@@ -236,35 +236,57 @@ class UnifiedDataLoader:
             return ""
     
     def _load_local_alphafin_data(self) -> List[DocumentWithMetadata]:
-        """Load AlphaFin data from local file"""
+        """Load AlphaFin data from local file, prefer QCA format, support dedup and smart question generation"""
         alphafin_docs = []
-        local_path = Path(self.data_dir) / "alphafin/sample_data.json"
-        
-        if not local_path.exists():
-            return alphafin_docs
-        
-        try:
-            with open(local_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            for item in data:
-                instruction = item.get('instruction', '')
-                input_text = item.get('input', '')
-                output = item.get('output', '')
-                
-                # Combine all fields into a meaningful content
-                content = f"Instruction: {instruction}\nInput: {input_text}\nOutput: {output}"
-                
-                alphafin_docs.append(DocumentWithMetadata(
-                    content=content,
-                    metadata={
-                        "source": "alphafin",
-                        "split": item.get('split', 'unknown')
-                    }
-                ))
-        except Exception as e:
-            self.logger.error(f"Error loading local AlphaFin data: {str(e)}")
-        
+        qca_path = Path(self.data_dir) / "alphafin/alphafin_qca.json"
+        raw_path = Path(self.data_dir) / "alphafin/sample_data.json"
+        seen_questions = set()
+        if qca_path.exists():
+            try:
+                with open(qca_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                for item in data:
+                    question = item.get('question', '').strip()
+                    context = item.get('context', '').strip()
+                    answer = item.get('answer', '').strip()
+                    # 智能问句生成
+                    if not question:
+                        question = context[:30] + '……请简要分析。'
+                    # 去重
+                    if not question or not context or not answer or question in seen_questions:
+                        continue
+                    seen_questions.add(question)
+                    alphafin_docs.append(DocumentWithMetadata(
+                        content=f"Question: {question}\nContext: {context}\nAnswer: {answer}",
+                        metadata={
+                            "source": "alphafin",
+                            "question": question
+                        }
+                    ))
+            except Exception as e:
+                self.logger.error(f"Error loading QCA AlphaFin data: {str(e)}")
+        elif raw_path.exists():
+            # fallback to old logic
+            try:
+                with open(raw_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                for item in data:
+                    instruction = item.get('instruction', '').strip()
+                    input_text = item.get('input', '').strip()
+                    output = item.get('output', '').strip()
+                    question = instruction or input_text[:30] + '……请简要分析。'
+                    if not question or not input_text or not output or question in seen_questions:
+                        continue
+                    seen_questions.add(question)
+                    alphafin_docs.append(DocumentWithMetadata(
+                        content=f"Question: {question}\nContext: {input_text}\nAnswer: {output}",
+                        metadata={
+                            "source": "alphafin",
+                            "question": question
+                        }
+                    ))
+            except Exception as e:
+                self.logger.error(f"Error loading local AlphaFin data: {str(e)}")
         return alphafin_docs
     
     def _load_hf_alphafin_data(self) -> List[DocumentWithMetadata]:

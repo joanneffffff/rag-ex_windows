@@ -95,4 +95,27 @@ def process_alphafin_data():
         raise
 
 if __name__ == "__main__":
-    process_alphafin_data() 
+    process_alphafin_data()
+
+input_path = 'data/alphafin/sample_data.json'
+output_path = 'data/alphafin/alphafin_qca.json'
+
+qca_data = []
+
+with open(input_path, 'r', encoding='utf-8') as f:
+    data = json.load(f)
+    for item in data:
+        question = item.get('instruction', '').strip()
+        context = item.get('input', '').strip()
+        answer = item.get('output', '').strip()
+        if question and context and answer:
+            qca_data.append({
+                'question': question,
+                'context': context,
+                'answer': answer
+            })
+
+with open(output_path, 'w', encoding='utf-8') as f:
+    json.dump(qca_data, f, ensure_ascii=False, indent=2)
+
+print(f"已完成Q-C-A格式清洗，输出到: {output_path}") 
