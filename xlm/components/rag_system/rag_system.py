@@ -66,24 +66,26 @@ class RagSystem:
         # 检测问题语言
         question_is_chinese = self.is_chinese(user_input)
         
-        # 根据问题语言筛选检索语料
-        if hasattr(self.retriever, 'corpus_documents'):
-            if question_is_chinese:
-                filtered_docs = [doc for doc in self.retriever.corpus_documents if 'alpha' in doc.metadata.source.lower()]
-            else:
-                filtered_docs = [doc for doc in self.retriever.corpus_documents if 'tatqa' in doc.metadata.source.lower()]
-            # 临时替换retriever的corpus_documents
-            original_docs = self.retriever.corpus_documents
-            self.retriever.corpus_documents = filtered_docs
-        else:
-            original_docs = None
-        # 检索
+        # 全量检索
         retrieved_documents, retriever_scores = self.retriever.retrieve(
-            text=user_input, top_k=self.retriever_top_k, return_scores=True
+            text=user_input, top_k=10, return_scores=True
         )
-        # 恢复原始corpus_documents
-        if original_docs is not None:
-            self.retriever.corpus_documents = original_docs
+        # 根据问题语言过滤检索结果
+        if question_is_chinese:
+            filtered = [(doc, score) for doc, score in zip(retrieved_documents, retriever_scores) if 'alpha' in doc.metadata.source.lower()]
+        else:
+            filtered = [(doc, score) for doc, score in zip(retrieved_documents, retriever_scores) if 'tatqa' in doc.metadata.source.lower()]
+        if not filtered:
+            return RagOutput(
+                retrieved_documents=[],
+                retriever_scores=[],
+                prompt="",
+                generated_responses=["未找到合适的语料，请检查数据源。" if question_is_chinese else "No suitable context found for your question. Please check the data sources."],
+                metadata={}
+            )
+        retrieved_documents, retriever_scores = zip(*filtered)
+        retrieved_documents = list(retrieved_documents)[:self.retriever_top_k]
+        retriever_scores = list(retriever_scores)[:self.retriever_top_k]
         doc_sources = [doc.metadata.source for doc in retrieved_documents]
         # 简单任务类型推断
         if any("table" in src for src in doc_sources):
