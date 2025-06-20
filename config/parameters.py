@@ -10,7 +10,8 @@ from typing import Dict, Optional, List
 class EncoderConfig:
     # model_name: str = "all-MiniLM-L6-v2"
     model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    cache_dir: str = "M:/huggingface"
+    # cache_dir: str = "M:/huggingface"
+    cache_dir: str = "D:/AI/huggingface"
     device: Optional[str] = None  # Will auto-detect if None
     batch_size: int = 32
     max_length: int = 512
@@ -46,7 +47,8 @@ class SystemConfig:
 @dataclass
 class GeneratorConfig:
     model_name: str = "Qwen/Qwen3-0.6B"
-    cache_dir: str = "M:/huggingface"
+    # cache_dir: str = "M:/huggingface"
+    cache_dir: str = "D:/AI/huggingface"
 
 @dataclass
 class Config:

@@ -206,7 +206,7 @@ class OptimizedUI:
             return
         
         with gr.Blocks() as demo:
-            gr.Markdown("# Financial Explainable RAG System (English UI, answers match question language)")
+            gr.Markdown("# Financial Explainable RAG System")
             # Input area
             with gr.Row():
                 with gr.Column(scale=4):
