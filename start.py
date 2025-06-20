@@ -2,6 +2,7 @@ import os
 import sys
 import warnings
 from pathlib import Path
+from config.parameters import config
 
 # 初始化NLTK数据
 print("正在检查NLTK数据...")
@@ -64,12 +65,11 @@ if __name__ == "__main__":
             sys.exit(1)
         
         # 配置参数
-        encoder_model_name = "all-MiniLM-L6-v2"  # 使用较小的编码器模型
-        generator_model_name = "facebook/opt-125m"  # 使用较小的生成器模型
-        data_path = "data/rise_of_ai.txt"
+        encoder_model_name = config.encoder.model_name
+        generator_model_name = config.encoder.model_name  # 如有generator配置可用config.generator.model_name
+        data_path = config.data.data_path if hasattr(config.data, 'data_path') else "data/rise_of_ai.txt"
         prompt_template = "Context: {context}\nQuestion: {question}\n\nAnswer:"
-        # cache_dir = "D:/AI/huggingface"
-        cache_dir = "M:/huggingface"
+        cache_dir = config.encoder.cache_dir
         
         print("正在启动 RAG-Ex 系统...")
         print(f"- 使用编码器: {encoder_model_name}")

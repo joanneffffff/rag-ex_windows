@@ -22,7 +22,7 @@ from xlm.registry.generator import load_generator
 from xlm.components.rag_system.rag_system import RagSystem
 from xlm.components.retriever.sbert_retriever import SBERTRetriever
 from xlm.components.encoder.multimodal_encoder import MultiModalEncoder
-from config.parameters import Config, EncoderConfig, RetrieverConfig, ModalityConfig
+from config.parameters import Config, EncoderConfig, RetrieverConfig, ModalityConfig, config
 
 # Ignore warnings
 warnings.filterwarnings("ignore")
@@ -112,10 +112,10 @@ class OptimizedUI:
         self.model = None
         self.tokenizer = None
         self.data_loader = UnifiedDataLoader(
-            batch_size=16,  # 减小批处理大小
-            max_samples=500  # 减少每个数据源的样本数
+            batch_size=16,  # 可选：如需统一也可用config.encoder.batch_size
+            max_samples=500,  # 可选
+            cache_dir=config.encoder.cache_dir
         )
-        # 数据加载器会在初始化时自动加载数据
         self.documents = self.data_loader.documents
         self.rag_system = None
         
@@ -127,23 +127,9 @@ class OptimizedUI:
         try:
             # 初始化检索器
             print("Initializing retriever...")
-            config = Config(
-                encoder=EncoderConfig(
-                    model_name="paraphrase-multilingual-MiniLM-L12-v2",
-                    device="cpu",
-                    batch_size=8
-                ),
-                retriever=RetrieverConfig(num_threads=2),
-                modality=ModalityConfig(
-                    combine_method="weighted_sum",
-                    text_weight=0.4,
-                    table_weight=0.3,
-                    time_series_weight=0.3
-                )
-            )
             encoder = MultiModalEncoder(
                 config=config,
-                use_enhanced_encoders=True  # 使用增强编码器
+                use_enhanced_encoders=True
             )
             retriever = SBERTRetriever(
                 encoder=encoder,
@@ -151,9 +137,9 @@ class OptimizedUI:
             )
             
             # 初始化生成器
-            print("加载生成器模型: Qwen/Qwen1.5-0.5B")
+            print(f"加载生成器模型: {config.encoder.model_name}")
             generator = load_generator(
-                generator_model_name="Qwen/Qwen1.5-0.5B",
+                generator_model_name=config.encoder.model_name,
                 use_local_llm=True
             )
             # --- To use Qwen3-8B as the generator model, uncomment below ---

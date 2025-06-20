@@ -115,11 +115,16 @@ class RagSystem:
         safe_kwargs["question"] = user_input
         # 兜底：为所有常见模板变量提供默认值，防止KeyError
         for key in [
-            "answer", "answer_type", "scale", "derivation", "table_content", "paragraph", "stock_code", "date", "raw_data", "indicator"
+            "answer", "answer_type", "scale", "derivation", "table_content", "paragraph", "stock_code", "date", "raw_data", "indicator", "word_count", "sentence_count"
         ]:
             if key not in safe_kwargs:
                 safe_kwargs[key] = ""
         prompt = prompt_template.format_map(safe_kwargs)
+        # 根据问题语言加前缀指令
+        if question_is_chinese:
+            prompt = "请用中文回答。\n" + prompt
+        else:
+            prompt = "Please answer in English.\n" + prompt
         generated_responses = self.generator.generate(texts=[prompt])
         return RagOutput(
             retrieved_documents=retrieved_documents,
