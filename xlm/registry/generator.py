@@ -1,6 +1,7 @@
 from xlm.components.generator.llm_generator import LLMGenerator
 from xlm.components.generator.local_llm_generator import LocalLLMGenerator
 from xlm.registry import DEFAULT_LMS_ENDPOINT
+from config.parameters import config
 
 
 def load_generator(
@@ -8,6 +9,7 @@ def load_generator(
     split_lines: bool = False,
     use_local_llm: bool = False,
     lms_endpoint: str = DEFAULT_LMS_ENDPOINT,
+    cache_dir: str = None,
 ):
     """
     加载生成器
@@ -16,6 +18,7 @@ def load_generator(
         split_lines: 是否按行分割
         use_local_llm: 是否使用本地LLM
         lms_endpoint: LMS服务端点
+        cache_dir: 缓存目录
     Returns:
         Generator实例
     Note:
@@ -24,8 +27,7 @@ def load_generator(
     if use_local_llm:
         return LocalLLMGenerator(
             model_name=generator_model_name,
-            # cache_dir="D:/AI/huggingface",
-            cache_dir="M:/huggingface",
+            cache_dir=cache_dir or config.generator.cache_dir,
             temperature=0.1,  # 降低温度以获得更确定性的答案
             max_new_tokens=50,  # 限制生成长度
             top_p=0.9

@@ -66,10 +66,10 @@ if __name__ == "__main__":
         
         # 配置参数
         encoder_model_name = config.encoder.model_name
-        generator_model_name = config.encoder.model_name  # 如有generator配置可用config.generator.model_name
+        generator_model_name = config.generator.model_name
         data_path = config.data.data_path if hasattr(config.data, 'data_path') else "data/rise_of_ai.txt"
         prompt_template = "Context: {context}\nQuestion: {question}\n\nAnswer:"
-        cache_dir = config.encoder.cache_dir
+        cache_dir = config.generator.cache_dir
         
         print("正在启动 RAG-Ex 系统...")
         print(f"- 使用编码器: {encoder_model_name}")
@@ -89,7 +89,8 @@ if __name__ == "__main__":
         generator = load_generator(
             generator_model_name=generator_model_name,
             split_lines=False,
-            use_local_llm=True  # 启用本地LLM
+            use_local_llm=True,  # 启用本地LLM
+            cache_dir=cache_dir
         )
         
         # 加载RAG系统

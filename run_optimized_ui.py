@@ -137,9 +137,9 @@ class OptimizedUI:
             )
             
             # 初始化生成器
-            print(f"加载生成器模型: {config.encoder.model_name}")
+            print(f"加载生成器模型: {config.generator.model_name}")
             generator = load_generator(
-                generator_model_name=config.encoder.model_name,
+                generator_model_name=config.generator.model_name,
                 use_local_llm=True
             )
             # --- To use Qwen3-8B as the generator model, uncomment below ---

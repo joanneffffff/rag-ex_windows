@@ -44,12 +44,18 @@ class SystemConfig:
     temp_dir: str = "temp"
 
 @dataclass
+class GeneratorConfig:
+    model_name: str = "Qwen/Qwen3-0.6B"
+    cache_dir: str = "M:/huggingface"
+
+@dataclass
 class Config:
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     data: DataConfig = field(default_factory=DataConfig)
     modality: ModalityConfig = field(default_factory=ModalityConfig)
     system: SystemConfig = field(default_factory=SystemConfig)
+    generator: GeneratorConfig = field(default_factory=GeneratorConfig)
 
     @classmethod
     def load_environment_config(cls) -> 'Config':
