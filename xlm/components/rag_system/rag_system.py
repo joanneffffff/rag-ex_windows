@@ -66,9 +66,24 @@ class RagSystem:
         # 检测问题语言
         question_is_chinese = self.is_chinese(user_input)
         
+        # 根据问题语言筛选检索语料
+        if hasattr(self.retriever, 'corpus_documents'):
+            if question_is_chinese:
+                filtered_docs = [doc for doc in self.retriever.corpus_documents if 'alpha' in doc.metadata.source.lower()]
+            else:
+                filtered_docs = [doc for doc in self.retriever.corpus_documents if 'tatqa' in doc.metadata.source.lower()]
+            # 临时替换retriever的corpus_documents
+            original_docs = self.retriever.corpus_documents
+            self.retriever.corpus_documents = filtered_docs
+        else:
+            original_docs = None
+        # 检索
         retrieved_documents, retriever_scores = self.retriever.retrieve(
             text=user_input, top_k=self.retriever_top_k, return_scores=True
         )
+        # 恢复原始corpus_documents
+        if original_docs is not None:
+            self.retriever.corpus_documents = original_docs
         doc_sources = [doc.metadata.source for doc in retrieved_documents]
         # 简单任务类型推断
         if any("table" in src for src in doc_sources):
@@ -120,11 +135,21 @@ class RagSystem:
             if key not in safe_kwargs:
                 safe_kwargs[key] = ""
         prompt = prompt_template.format_map(safe_kwargs)
-        # 根据问题语言加前缀指令
+        # 优化prompt语言一致性
+        def is_context_chinese(context):
+            return any(re.search(r'[\u4e00-\u9fff]', c) for c in context)
+        context_is_chinese = is_context_chinese(document_contents)
+        # 根据问题语言加前缀指令，并多次强调
         if question_is_chinese:
-            prompt = "请用中文回答。\n" + prompt
+            prefix = "请用中文回答。"
+            if not context_is_chinese:
+                prefix += "（上下文为英文，但请务必用中文作答。）"
+            prompt = f"{prefix}\n请务必用中文作答。\n" + prompt + "\n请再次确认你的回答是中文。"
         else:
-            prompt = "Please answer in English.\n" + prompt
+            prefix = "Please answer in English."
+            if context_is_chinese:
+                prefix += " (The context is in Chinese, but please answer in English.)"
+            prompt = f"{prefix}\nYour answer must be in English only.\n" + prompt + "\nDouble check your answer is in English."
         generated_responses = self.generator.generate(texts=[prompt])
         return RagOutput(
             retrieved_documents=retrieved_documents,
