@@ -242,15 +242,13 @@ class OptimizedUI:
             # Example questions
             gr.Examples(
                 examples=[
-                    ["What is the revenue for Q4 2019?"],
-                    ["What is the operating margin in 2018?"],
-                    ["What are the R&D expenses in 2019?"],
-                    ["2019年第四季度利润是多少？"],
-                    ["毛利率趋势分析"],
-                    ["研发投入比例"]
+                    ["What does the Weighted average actuarial assumptions consist of?"],
+                    ["How much is the 2019 rate of inflation?"],
+                    ["我是一位股票分析师，我需要利用以下新闻信息来更好地完成金融分析，请你对下列新闻提取出可能对我有帮助的关键信息，形成更精简的新闻摘要。新闻具体内容如下："],
+                    ["我是一位股票分析师，我需要利用以下新闻信息来更好地完成金融分析，请你对下列新闻提取出可能对我有帮助的关键信息，形成更精简的新闻摘要。新闻具体内容如下："]
                 ],
                 inputs=query,
-                label="Example Questions"
+                label="Sample Questions"
             )
             # Submit button
             submit_btn.click(
