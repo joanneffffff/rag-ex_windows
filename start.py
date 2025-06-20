@@ -25,7 +25,8 @@ def load_visualizer() -> Visualizer:
 def ensure_directories():
     """确保必要的目录存在"""
     dirs = [
-        "D:/AI/huggingface",
+        # "D:/AI/huggingface",
+        "M:/huggingface",
         "data",
         "xlm/ui/images",
         "xlm/ui/css"
@@ -67,7 +68,8 @@ if __name__ == "__main__":
         generator_model_name = "facebook/opt-125m"  # 使用较小的生成器模型
         data_path = "data/rise_of_ai.txt"
         prompt_template = "Context: {context}\nQuestion: {question}\n\nAnswer:"
-        cache_dir = "D:/AI/huggingface"
+        # cache_dir = "D:/AI/huggingface"
+        cache_dir = "M:/huggingface"
         
         print("正在启动 RAG-Ex 系统...")
         print(f"- 使用编码器: {encoder_model_name}")

@@ -89,27 +89,19 @@ class TatQAProcessor:
         return documents
     
     def _process_table(self, table_data: dict) -> DocumentWithMetadata:
-        """Process table data"""
+        """处理表格数据为结构化中文格式"""
         try:
-            # Convert table to DataFrame
             df = pd.DataFrame(table_data)
-            
-            # Get table metadata
             num_rows, num_cols = df.shape
             col_types = df.dtypes.to_dict()
-            
-            # Convert to string representation
             table_str = df.to_string()
-            
-            # Create structured content
-            content = "Table Analysis:\n"
-            content += f"Dimensions: {num_rows} rows × {num_cols} columns\n"
-            content += "Column Types:\n"
+            content = "[表格分析]\n"
+            content += f"维度: {num_rows}行 × {num_cols}列\n"
+            content += "列类型:\n"
             for col, dtype in col_types.items():
                 content += f"- {col}: {dtype}\n"
-            content += "\nTable Content:\n"
+            content += "\n表格内容:\n"
             content += table_str
-            
             return DocumentWithMetadata(
                 content=content,
                 metadata=DocumentMetadata(
@@ -123,18 +115,15 @@ class TatQAProcessor:
             return None
     
     def _process_paragraph(self, para_data: str) -> DocumentWithMetadata:
-        """Process paragraph data"""
+        """处理段落数据为结构化中文格式"""
         try:
-            # Add some basic text analysis
             sentences = para_data.split('.')
             word_count = len(para_data.split())
-            
-            content = "Paragraph Analysis:\n"
-            content += f"Word Count: {word_count}\n"
-            content += f"Sentence Count: {len(sentences)}\n"
-            content += "\nParagraph Content:\n"
+            content = "[段落分析]\n"
+            content += f"词数: {word_count}\n"
+            content += f"句数: {len(sentences)}\n"
+            content += "\n段落内容:\n"
             content += para_data
-            
             return DocumentWithMetadata(
                 content=content,
                 metadata=DocumentMetadata(
@@ -148,33 +137,27 @@ class TatQAProcessor:
             return None
     
     def _process_qa_pair(self, qa: dict, context_docs: list) -> DocumentWithMetadata:
-        """Process single QA pair with context"""
+        """处理单个问答对为结构化中文格式"""
         try:
-            # Extract question and answer
             question = qa.get('question', '')
             answer = qa.get('answer', '')
             answer_type = qa.get('answer_type', '')
             answer_scale = qa.get('scale', '')
             derivation = qa.get('derivation', [])
-            
-            # Build content with full context
-            content = "Question-Answer Pair:\n"
-            content += f"Q: {question}\n"
-            content += f"A: {answer}\n"
-            content += f"Answer Type: {answer_type}\n"
+            content = "[问答对]\n"
+            content += f"问题: {question}\n"
+            content += f"答案: {answer}\n"
+            content += f"答案类型: {answer_type}\n"
             if answer_scale:
-                content += f"Scale: {answer_scale}\n"
+                content += f"量纲: {answer_scale}\n"
             if derivation:
-                content += "Derivation Steps:\n"
+                content += "推导步骤:\n"
                 for step in derivation:
                     content += f"- {step}\n"
-            
-            # Add relevant context
-            content += "\nContext:\n"
+            content += "\n上下文:\n"
             for doc in context_docs:
                 content += f"\n{doc.content}\n"
                 content += "-" * 40 + "\n"
-            
             return DocumentWithMetadata(
                 content=content,
                 metadata=DocumentMetadata(

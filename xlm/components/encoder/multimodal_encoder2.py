@@ -56,7 +56,10 @@ class SmartChunker:
         return chunks
 
 class TableEncoder(nn.Module):
-    def __init__(self, base_model: str = "sentence-transformers/all-MiniLM-L6-v2", device: str = "cpu"):
+    def __init__(self, 
+        # base_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        base_model: str = "paraphrase-multilingual-MiniLM-L12-v2", 
+        device: str = "cpu"):
         super().__init__()
         self.device = device
         self.base_model = SentenceTransformer(base_model, device=device)
@@ -82,7 +85,10 @@ class TableEncoder(nn.Module):
             return embeddings.cpu().numpy()
 
 class TimeSeriesEncoder(nn.Module):
-    def __init__(self, base_model: str = "sentence-transformers/all-MiniLM-L6-v2", device: str = "cpu"):
+    def __init__(self, 
+        # base_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        base_model: str = "paraphrase-multilingual-MiniLM-L12-v2", 
+        device: str = "cpu"):
         super().__init__()
         self.device = device
         self.base_model = SentenceTransformer(base_model, device=device)

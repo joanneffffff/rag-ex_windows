@@ -13,7 +13,8 @@ class FinBertSBERT(nn.Module):
     def __init__(
         self,
         finbert_model: str = "ProsusAI/finbert",
-        sbert_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        # sbert_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        sbert_model: str = "paraphrase-multilingual-MiniLM-L12-v2",
         fusion_method: str = "concat"
     ):
         super().__init__()

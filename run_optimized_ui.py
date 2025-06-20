@@ -129,7 +129,7 @@ class OptimizedUI:
             print("Initializing retriever...")
             config = Config(
                 encoder=EncoderConfig(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2",
+                    model_name="paraphrase-multilingual-MiniLM-L12-v2",
                     device="cpu",
                     batch_size=8
                 ),
@@ -151,11 +151,21 @@ class OptimizedUI:
             )
             
             # 初始化生成器
-            print("加载生成器模型: facebook/opt-125m")
+            print("加载生成器模型: Qwen/Qwen1.5-0.5B")
             generator = load_generator(
-                generator_model_name="facebook/opt-125m",
+                generator_model_name="Qwen/Qwen1.5-0.5B",
                 use_local_llm=True
             )
+            # --- To use Qwen3-8B as the generator model, uncomment below ---
+            # generator = load_generator(
+            #     generator_model_name="Qwen/Qwen3-8B",
+            #     use_local_llm=True
+            # )
+            # --- To use Fin-R1 as the generator model, uncomment below ---
+            # generator = load_generator(
+            #     generator_model_name="SUFE-AIFLM-Lab/Fin-R1",
+            #     use_local_llm=True
+            # )
             print("生成器模型加载完成")
             
             # 初始化RAG系统
@@ -177,20 +187,25 @@ class OptimizedUI:
         try:
             # 运行RAG系统
             rag_output = self.rag_system.run(user_input=query)
-            
-            # 准备输出
             answer = rag_output.generated_responses[0]
             doc = rag_output.retrieved_documents[0]
             score = rag_output.retriever_scores[0]
-            
+            # 检测问题语言
+            question_is_chinese = any('\u4e00' <= ch <= '\u9fff' for ch in query)
             # 构建响应
-            response = {
-                "answer": answer,
-                "context": f"相关度分数: {score:.4f}\n\n{doc.content}"
-            }
-            
+            if question_is_chinese:
+                # 中文问题，界面全部中文
+                response = {
+                    "answer": answer,
+                    "context": f"相关度分数: {score:.4f}\n\n{doc.content}"
+                }
+            else:
+                # 英文问题，答案为英文，界面标签中文
+                response = {
+                    "answer": answer,
+                    "context": f"相关度分数: {score:.4f}\n\n{doc.content}"
+                }
             return response["answer"], response["context"]
-            
         except Exception as e:
             print(f"Error processing query: {str(e)}")
             traceback.print_exc()
@@ -205,9 +220,8 @@ class OptimizedUI:
             return
         
         with gr.Blocks() as demo:
-            gr.Markdown("# Financial Explainable RAG System")
-            
-            # 输入区域
+            gr.Markdown("# Financial Explainable RAG System (English UI, answers match question language)")
+            # Input area
             with gr.Row():
                 with gr.Column(scale=4):
                     datasource = gr.Radio(
@@ -215,19 +229,16 @@ class OptimizedUI:
                         value="Both",
                         label="Data Source"
                     )
-                    
             with gr.Row():
                 with gr.Column(scale=4):
                     query = gr.Textbox(
                         show_label=False,
-                        placeholder="Enter your question",
+                        placeholder="Enter your question (English or Chinese supported)",
                         label="Question"
                     )
                     submit_btn = gr.Button("Submit")
-            
-            # 使用标签页分离显示
+            # Tabs for answer and explanation
             with gr.Tabs():
-                # 回答标签页
                 with gr.TabItem("Answer"):
                     answer_box = gr.Textbox(
                         show_label=False,
@@ -235,8 +246,6 @@ class OptimizedUI:
                         label="Answer",
                         lines=5
                     )
-                
-                # 解释标签页
                 with gr.TabItem("Explanation"):
                     context_box = gr.Textbox(
                         show_label=False,
@@ -244,8 +253,7 @@ class OptimizedUI:
                         label="Context",
                         lines=10
                     )
-
-            # 添加示例问题
+            # Example questions
             gr.Examples(
                 examples=[
                     ["What is the revenue for Q4 2019?"],
@@ -258,14 +266,12 @@ class OptimizedUI:
                 inputs=query,
                 label="Example Questions"
             )
-
-            # 处理提交
+            # Submit button
             submit_btn.click(
                 fn=self.process_query,
                 inputs=[query, datasource],
                 outputs=[answer_box, context_box],
             )
-
         demo.launch(share=False)
 
 if __name__ == "__main__":

@@ -97,6 +97,16 @@ class OptimizedConsoleQA:  # 将类名更改为更具描述性
                 generator_model_name="facebook/opt-125m",  # 使用小型模型进行本地测试
                 use_local_llm=True
             )
+            # --- To use Qwen3-8B as the generator model, uncomment below ---
+            # generator = load_generator(
+            #     generator_model_name="Qwen/Qwen3-8B",
+            #     use_local_llm=True
+            # )
+            # --- To use Fin-R1 as the generator model, uncomment below ---
+            # generator = load_generator(
+            #     generator_model_name="SUFE-AIFLM-Lab/Fin-R1",
+            #     use_local_llm=True
+            # )
             print("生成器模型加载完成")
 
             # 初始化RAG系统

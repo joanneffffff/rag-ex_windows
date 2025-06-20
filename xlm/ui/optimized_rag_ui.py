@@ -16,9 +16,12 @@ from config.parameters import Config, EncoderConfig, RetrieverConfig, ModalityCo
 class OptimizedRagUI:
     def __init__(
         self,
-        encoder_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
-        generator_model_name: str = "facebook/opt-125m",
-        cache_dir: str = "D:/AI/huggingface",
+        # encoder_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        encoder_model_name: str = "paraphrase-multilingual-MiniLM-L12-v2",
+        # generator_model_name: str = "facebook/opt-125m",
+        generator_model_name: str = "Qwen/Qwen3-8B",
+        # cache_dir: str = "D:/AI/huggingface",
+        cache_dir: str = "M:/huggingface",
         data_path: str = "data/rise_of_ai.txt",
         use_faiss: bool = True,
         window_title: str = "RAG System with FAISS",

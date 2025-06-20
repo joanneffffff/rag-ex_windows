@@ -12,17 +12,20 @@ def load_generator(
     """
     加载生成器
     Args:
-        generator_model_name: 模型名称
+        generator_model_name: 模型名称（支持如"facebook/opt-125m"、"llama2-7b-chat"、"qwen3-8b"等）
         split_lines: 是否按行分割
         use_local_llm: 是否使用本地LLM
         lms_endpoint: LMS服务端点
     Returns:
         Generator实例
+    Note:
+        现在支持qwen3-8b作为生成器模型，只需将generator_model_name设为"qwen3-8b"。
     """
     if use_local_llm:
         return LocalLLMGenerator(
             model_name=generator_model_name,
-            cache_dir="D:/AI/huggingface",
+            # cache_dir="D:/AI/huggingface",
+            cache_dir="M:/huggingface",
             temperature=0.1,  # 降低温度以获得更确定性的答案
             max_new_tokens=50,  # 限制生成长度
             top_p=0.9

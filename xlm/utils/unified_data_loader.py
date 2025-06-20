@@ -17,7 +17,8 @@ class UnifiedDataLoader:
     def __init__(
         self,
         data_dir: str = "data",
-        cache_dir: str = "D:/AI/huggingface",
+        # cache_dir: str = "D:/AI/huggingface",
+        cache_dir: str = "M:/huggingface",
         use_faiss: bool = True,
         batch_size: int = 32,
         max_samples: int = 1000,  # 限制每个数据源的最大样本数
@@ -34,8 +35,9 @@ class UnifiedDataLoader:
         self.logger = logging.getLogger(__name__)
         
         print("准备加载 SentenceTransformer ...")
+        # 推荐多语言模型 paraphrase-multilingual-MiniLM-L12-v2
         self.encoder = SentenceTransformer(
-            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+            "paraphrase-multilingual-MiniLM-L12-v2",
             cache_folder=cache_dir
         )
         print("SentenceTransformer 加载完成")
@@ -174,11 +176,16 @@ class UnifiedDataLoader:
                 if 'paragraphs' in item and isinstance(item['paragraphs'], list):
                     for para in item['paragraphs']:
                         if para and str(para).strip():
+                            # 统计词数和句数
+                            word_count = len(str(para).split())
+                            sentence_count = str(para).count('.') + str(para).count('。')
                             tatqa_docs.append(DocumentWithMetadata(
                                 content=str(para),
                                 metadata={
                                     "source": "tatqa_paragraph",
-                                    "id": str(item.get('id', ''))
+                                    "id": str(item.get('id', '')),
+                                    "word_count": word_count,
+                                    "sentence_count": sentence_count
                                 }
                             ))
         

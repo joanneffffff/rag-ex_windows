@@ -16,8 +16,10 @@ score_comparator = ScoreComparator()
 # 初始化基于编码的比较器
 sentence_transformers_based_comparator = EmbeddingComparator(
     encoder=Encoder(
-        model_name="all-MiniLM-L6-v2",
-        cache_dir="D:/AI/huggingface"
+        # model_name="all-MiniLM-L6-v2",
+        model_name="paraphrase-multilingual-MiniLM-L12-v2",
+        # cache_dir="D:/AI/huggingface",
+        cache_dir="M:/huggingface"
     )
 )
 
@@ -44,7 +46,8 @@ def load_comparator(comparator_name: str, model_name: str = None):
         return EmbeddingComparator(
             encoder=Encoder(
                 model_name=model_name,
-                cache_dir="D:/AI/huggingface"
+                # cache_dir="D:/AI/huggingface",
+                cache_dir="M:/huggingface"
             )
         )
     

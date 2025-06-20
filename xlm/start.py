@@ -35,6 +35,18 @@ if __name__ == "__main__":
         split_lines=False,
         use_local_llm=True
     )
+    # --- To use Qwen3-8B as the generator model, uncomment below ---
+    # generator = load_generator(
+    #     generator_model_name="Qwen/Qwen3-8B",
+    #     split_lines=False,
+    #     use_local_llm=True
+    # )
+    # --- To use Fin-R1 as the generator model, uncomment below ---
+    # generator = load_generator(
+    #     generator_model_name="SUFE-AIFLM-Lab/Fin-R1",
+    #     split_lines=False,
+    #     use_local_llm=True
+    # )
     rag_system = load_rag_system(
         retriever=retriever, generator=generator, prompt_template=prompt_template
     )

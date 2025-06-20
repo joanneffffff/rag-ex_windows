@@ -6,14 +6,17 @@ from sentence_transformers import SentenceTransformer
 class Encoder:
     def __init__(
         self,
-        model_name: str = "all-MiniLM-L6-v2",
+        # model_name: str = "all-MiniLM-L6-v2",
+        model_name: str = "paraphrase-multilingual-MiniLM-L12-v2",
         device: str = None,
-        cache_dir: str = "D:/AI/huggingface",
+        # cache_dir: str = "D:/AI/huggingface",
+        cache_dir: str = "M:/huggingface",
     ):
         """
         初始化编码器
         Args:
-            model_name: 模型名称
+            model_name: 模型名称（推荐 paraphrase-multilingual-MiniLM-L12-v2 支持多语言）
+            # model_name: str = "all-MiniLM-L6-v2"
             device: 设备 (cpu/cuda)
             cache_dir: 模型缓存目录
         """

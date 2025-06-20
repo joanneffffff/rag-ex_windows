@@ -1,6 +1,7 @@
 import os
 
-cache_dir = 'D:/AI/huggingface/datasets'
+# cache_dir = 'D:/AI/huggingface/datasets'
+cache_dir = 'M:/huggingface/datasets'
 os.environ['HF_DATASETS_CACHE'] = cache_dir
 
 from datasets import load_dataset

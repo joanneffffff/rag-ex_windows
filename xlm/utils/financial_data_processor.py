@@ -9,12 +9,7 @@ class FinancialDataProcessor:
         self.cache_dir = cache_dir
     
     def process_news(self, news_data: Dict) -> DocumentWithMetadata:
-        """Process news data into document format
-        
-        Args:
-            news_data: Dictionary containing news data with instruction, input, and output
-        """
-        # Extract timestamp if available
+        """处理新闻数据为结构化文档格式"""
         timestamp = None
         if isinstance(news_data['input'], str) and '_' in news_data['input']:
             timestamp_str = news_data['input'].split('_')[0]
@@ -22,14 +17,12 @@ class FinancialDataProcessor:
                 timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
             except ValueError:
                 pass
-        
-        # Combine relevant information
-        content = f"Timestamp: {timestamp if timestamp else 'N/A'}\n"
-        content += f"News: {news_data['input']}\n"
+        # 新模板格式
+        content = "[金融新闻]\n"
+        content += f"日期: {timestamp.strftime('%Y-%m-%d %H:%M:%S') if timestamp else 'N/A'}\n"
+        content += f"标题: {news_data['input'].split('_', 1)[-1] if '_' in news_data['input'] else news_data['input']}\n"
         if news_data.get('output'):
-            content += f"Summary: {news_data['output']}\n"
-        
-        # Create document
+            content += f"摘要: {news_data['output']}\n"
         return DocumentWithMetadata(
             content=content,
             metadata=DocumentMetadata(
@@ -40,29 +33,24 @@ class FinancialDataProcessor:
         )
     
     def process_stock_data(self, stock_data: Dict) -> List[DocumentWithMetadata]:
-        """Process stock market data into document format
-        
-        Args:
-            stock_data: Dictionary containing stock data
-        """
+        """处理股票问答数据为结构化文档格式"""
         documents = []
-        
-        # Process instruction-based data
         if isinstance(stock_data.get('instruction'), list):
             for i, (inst, inp, out) in enumerate(zip(
                 stock_data['instruction'],
                 stock_data['input'],
                 stock_data['output']
             )):
-                # Try to extract stock code and date
                 stock_info = self._extract_stock_info(inp)
-                
-                content = f"Stock: {stock_info['code'] if stock_info else 'Unknown'}\n"
-                content += f"Date: {stock_info['date'] if stock_info else 'Unknown'}\n"
-                content += f"Question: {inp}\n"
-                content += f"Answer: {out}\n"
-                
-                # Create document
+                content = "[股票问答]\n"
+                content += f"股票代码: {stock_info['code'] if stock_info else '未知'}\n"
+                content += f"日期: {stock_info['date'] if stock_info else '未知'}\n"
+                # 提取问题
+                question = inp.split('【问题】：')[-1] if '【问题】：' in inp else inp
+                content += f"问题: {question}\n"
+                # 提取答案
+                answer = out.replace('【答案】：', '').strip() if isinstance(out, str) else out
+                content += f"答案: {answer}\n"
                 doc = DocumentWithMetadata(
                     content=content,
                     metadata=DocumentMetadata(
@@ -72,7 +60,6 @@ class FinancialDataProcessor:
                     )
                 )
                 documents.append(doc)
-        
         return documents
     
     def _extract_stock_info(self, text: str) -> Optional[Dict[str, str]]:
@@ -92,38 +79,28 @@ class FinancialDataProcessor:
         return None
     
     def process_time_series(self, data: Dict[str, float], stock_code: str) -> DocumentWithMetadata:
-        """Process time series data into document format
-        
-        Args:
-            data: Dictionary of date-value pairs
-            stock_code: Stock code
-        """
-        # Convert to pandas Series for easier analysis
+        """处理时间序列数据为结构化文档格式"""
         series = pd.Series(data)
-        
-        # Calculate basic statistics
         stats = {
             'mean': series.mean(),
             'median': series.median(),
             'std': series.std(),
             'min': series.min(),
             'max': series.max(),
-            'trend': 'increasing' if series.iloc[-1] > series.iloc[0] else 'decreasing'
+            'trend': '上升' if series.iloc[-1] > series.iloc[0] else '下降'
         }
-        
-        # Create content with both raw data and analysis
-        content = f"Stock Code: {stock_code}\n"
-        content += f"Time Series Analysis:\n"
-        content += f"- Period: {series.index[0]} to {series.index[-1]}\n"
-        content += f"- Average: {stats['mean']:.4f}\n"
-        content += f"- Median: {stats['median']:.4f}\n"
-        content += f"- Standard Deviation: {stats['std']:.4f}\n"
-        content += f"- Range: {stats['min']:.4f} to {stats['max']:.4f}\n"
-        content += f"- Trend: {stats['trend']}\n"
-        content += "\nRaw Data:\n"
+        content = "[时间序列分析]\n"
+        content += f"股票代码: {stock_code}\n"
+        content += f"区间: {series.index[0]} 至 {series.index[-1]}\n"
+        content += f"均值: {stats['mean']:.4f}\n"
+        content += f"中位数: {stats['median']:.4f}\n"
+        content += f"标准差: {stats['std']:.4f}\n"
+        content += f"最小值: {stats['min']:.4f}\n"
+        content += f"最大值: {stats['max']:.4f}\n"
+        content += f"趋势: {stats['trend']}\n"
+        content += "原始数据:\n"
         for date, value in data.items():
-            content += f"{date}: {value:.4f}\n"
-        
+            content += f"  {date}: {value:.4f}\n"
         return DocumentWithMetadata(
             content=content,
             metadata=DocumentMetadata(

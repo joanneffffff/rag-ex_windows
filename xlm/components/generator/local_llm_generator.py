@@ -15,7 +15,8 @@ class LocalLLMGenerator(Generator):
         temperature: float = 0.7,
         max_new_tokens: int = 100,
         top_p: float = 0.9,
-        cache_dir: str = "D:/AI/huggingface"
+        # cache_dir: str = "D:/AI/huggingface"
+        cache_dir: str = "M:/huggingface"
     ):
         super().__init__(model_name=model_name)
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -28,7 +29,9 @@ class LocalLLMGenerator(Generator):
         os.makedirs(self.cache_dir, exist_ok=True)
         
         # 设置环境变量
+        # os.environ['HF_HOME'] = 'D:/AI/huggingface'
         os.environ['HF_HOME'] = self.cache_dir
+        # os.environ['TRANSFORMERS_CACHE'] = os.path.join('D:/AI/huggingface', 'transformers')
         os.environ['TRANSFORMERS_CACHE'] = os.path.join(self.cache_dir, 'transformers')
         
         # 加载模型和tokenizer
