@@ -27,7 +27,7 @@ def load_model_and_tokenizer(model_name: str, device: str):
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         quantization_config=bnb_config,
-        device_map="auto",
+        device_map=device,
         trust_remote_code=True,
         torch_dtype="auto",
     )
