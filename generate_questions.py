@@ -113,12 +113,14 @@ def generate_questions(
             pad_token_id=tokenizer.pad_token_id
         )
 
-        # Decode only the newly generated tokens for each item in the batch
-        for idx, output_ids in enumerate(outputs):
-            prompt_len = len(inputs.input_ids[idx])
-            generated_ids = output_ids[prompt_len:]
-            question = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-            
+        # The generate method returns the full sequence, including the prompt.
+        # We need to decode only the newly generated tokens.
+        input_ids_len = inputs['input_ids'].shape[1]
+        generated_tokens = outputs[:, input_ids_len:]
+        decoded_questions = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+
+        for idx, question in enumerate(decoded_questions):
+            question = question.strip()
             if question:
                 record = valid_records_in_batch[idx]
                 final_rag_data.append({
