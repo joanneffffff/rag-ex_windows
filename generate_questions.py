@@ -5,6 +5,7 @@ from pathlib import Path
 import argparse
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 import textwrap
+import sys
 
 def load_model_and_tokenizer(model_name: str, device: str):
     """
@@ -28,7 +29,7 @@ def load_model_and_tokenizer(model_name: str, device: str):
         quantization_config=bnb_config,
         device_map="auto",
         trust_remote_code=True,
-        torch_dtype="auto",  # Recommended for Qwen3
+        torch_dtype="auto",
     )
     
     if tokenizer.pad_token is None:
@@ -83,8 +84,8 @@ def generate_questions(
         messages_batch = []
         valid_records_in_batch = []
         for record in batch_records:
-            context = record.get('input', '').strip()
-            answer = record.get('output', '').strip()
+            context = record.get('context', '').strip()
+            answer = record.get('answer', '').strip()
             if context and answer:
                 messages = [
                     {"role": "system", "content": system_prompt},
@@ -96,40 +97,51 @@ def generate_questions(
         if not messages_batch:
             continue
 
+        is_qwen_model = "qwen" in model_name.lower()
+        template_args = {"tokenize": False, "add_generation_prompt": True}
+        if is_qwen_model:
+            template_args["enable_thinking"] = False
+
         prompts = [
             tokenizer.apply_chat_template(
-                conversation=m,
-                tokenize=False,
-                add_generation_prompt=True,
-                enable_thinking=False,  # Disable complex reasoning for this direct task
+                conversation=m, **template_args
             ) for m in messages_batch
         ]
 
         inputs = tokenizer(prompts, return_tensors="pt", padding=True).to(model.device)
         
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=60,
-            do_sample=True,
-            temperature=0.6,
-            top_p=0.95, # Recommended for Qwen3 thinking mode
-            pad_token_id=tokenizer.pad_token_id
-        )
+        gen_kwargs = {
+            "max_new_tokens": 60, "do_sample": True, "pad_token_id": tokenizer.pad_token_id
+        }
+        if is_qwen_model:
+            gen_kwargs["top_p"] = 0.95; gen_kwargs["temperature"] = 0.6
+        else:
+            gen_kwargs["top_p"] = 0.9; gen_kwargs["temperature"] = 0.7
 
-        # The generate method returns the full sequence, including the prompt.
-        # We need to decode only the newly generated tokens.
+        outputs = model.generate(**inputs, **gen_kwargs)
+
         input_ids_len = inputs['input_ids'].shape[1]
         generated_tokens = outputs[:, input_ids_len:]
-        decoded_questions = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+        decoded_questions = tokenizer.batch_decode(generated_tokens, skip_special_tokens=False)
 
-        for idx, question in enumerate(decoded_questions):
-            question = question.strip()
+        for idx, generated_text in enumerate(decoded_questions):
+            # Robust fix: The model sometimes generates the next turn's prompt.
+            # We split by the end-of-turn token and take only the first part,
+            # which is the actual generated content.
+            if '<|im_end|>' in generated_text:
+                question = generated_text.split('<|im_end|>')[0]
+            else:
+                question = generated_text
+
+            # Also remove any other special tokens that might have been missed
+            question = question.replace(tokenizer.eos_token, '').strip()
+
             if question:
                 record = valid_records_in_batch[idx]
                 final_rag_data.append({
                     'question': question,
-                    'context': record.get('input', '').strip(),
-                    'answer': record.get('output', '').strip()
+                    'context': record.get('context', '').strip(),
+                    'answer': record.get('answer', '').strip()
                 })
 
     # --- 5. Save Data ---
@@ -142,15 +154,15 @@ def generate_questions(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description="Generate specific questions for AlphaFin articles using an LLM on GPU.",
-        epilog="Note: This script is optimized for Qwen3 models and requires `transformers>=4.51.0`."
+        description="Generate specific questions for AlphaFin articles using an LLM.",
+        epilog="Use a small model like Phi-3-mini for testing on CPU."
     )
     
-    parser.add_argument("--input_file", type=str, default="data/alphafin/alphafin_cleaned.json", help="Path to the input cleaned data file.")
-    parser.add_argument("--output_file", type=str, default="data/alphafin/alphafin_rag_ready_qwen3_8b.json", help="Path to the output RAG-ready file.")
-    parser.add_argument("--model_name", type=str, default="Qwen/Qwen3-8B", help="Name of the Hugging Face model to use.")
+    parser.add_argument("--input_file", type=str, default="data/alphafin/alphafin_rag_ready.json", help="Path to the input cleaned data file.")
+    parser.add_argument("--output_file", type=str, default="data/alphafin/alphafin_rag_ready_generated.json", help="Path to the output RAG-ready file.")
+    parser.add_argument("--model_name", type=str, default="microsoft/Phi-3-mini-4k-instruct", help="Name of the Hugging Face model to use.")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to run on ('cuda' or 'cpu').")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for generation.")
+    parser.add_argument("--batch_size", type=int, default=1, help="Batch size for generation (use a smaller value for CPU).")
     parser.add_argument("--limit", type=int, default=None, help="Number of records to process for testing.")
     
     args = parser.parse_args()
@@ -158,6 +170,9 @@ if __name__ == '__main__':
     if args.device == "cuda" and not torch.cuda.is_available():
         print("Warning: CUDA specified but not available. Falling back to CPU.")
         args.device = "cpu"
+
+    if args.device == "cpu":
+        print("Running on CPU. Consider using a smaller batch size (e.g., --batch_size 1) and a limit (e.g., --limit 10).")
 
     generate_questions(
         input_path=Path(args.input_file),
