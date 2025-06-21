@@ -54,6 +54,7 @@ class SystemConfig:
 @dataclass
 class GeneratorConfig:
     model_name: str = "Qwen/Qwen2-1.5B-Instruct"
+    # model_name: str = "Qwen/Qwen3-8B"
     cache_dir: str = DEFAULT_CACHE_DIR
 
 @dataclass
