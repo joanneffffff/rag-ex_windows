@@ -19,9 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from xlm.utils.unified_data_loader import UnifiedDataLoader
 from xlm.registry.generator import load_generator
-from xlm.components.rag_system.rag_system import RagSystem
-from xlm.components.retriever.sbert_retriever import SBERTRetriever
-from xlm.components.encoder.multimodal_encoder import MultiModalEncoder
+from xlm.registry.rag_system import load_bilingual_rag_system
 from config.parameters import Config, EncoderConfig, RetrieverConfig, ModalityConfig
 
 # Ignore warnings
@@ -53,83 +51,35 @@ def is_chinese(text):
 
 class OptimizedConsoleQA:  # 将类名更改为更具描述性
     def __init__(self):
-        self.data_loader = UnifiedDataLoader(
-            batch_size=16,  # 减小批处理大小
-            max_samples=500  # 减少每个数据源的样本数
-        )
-        self.documents = self.data_loader.documents
+        # The data loader is no longer needed here, as the system handles it.
         self.rag_system = None
 
     def init_model(self):
         """Initialize the model and system components"""
-        if self.rag_system is not None:  # 检查 RAG 系统是否已经初始化
+        if self.rag_system is not None:
             return
 
         try:
-            # 初始化检索器
-            print("Initializing retriever...")
-            config = Config(
-                encoder=EncoderConfig(
-                    model_name="sentence-transformers/all-MiniLM-L6-v2",
-                    device="cpu",  # 在本地测试时，检索器编码器通常可以在 CPU 上运行
-                    batch_size=8
-                ),
-                retriever=RetrieverConfig(num_threads=2),
-                modality=ModalityConfig(
-                    combine_method="weighted_sum",
-                    text_weight=0.4,
-                    table_weight=0.3,
-                    time_series_weight=0.3
-                )
-            )
-            encoder = MultiModalEncoder(
-                config=config,
-                use_enhanced_encoders=True  # 使用增强编码器
-            )
-            retriever = SBERTRetriever(
-                encoder=encoder,
-                corpus_documents=self.documents
-            )
-
-            # 初始化生成器：这里使用原始的 load_generator，它会加载 facebook/opt-125m
-            print("加载生成器模型: facebook/opt-125m (本地测试用小型模型)")
-            generator = load_generator(
-                generator_model_name="facebook/opt-125m",  # 使用小型模型进行本地测试
-                use_local_llm=True
-            )
-            # --- To use Qwen3-8B as the generator model, uncomment below ---
-            # generator = load_generator(
-            #     generator_model_name="Qwen/Qwen3-8B",
-            #     use_local_llm=True
-            # )
-            # --- To use Fin-R1 as the generator model, uncomment below ---
-            # generator = load_generator(
-            #     generator_model_name="SUFE-AIFLM-Lab/Fin-R1",
-            #     use_local_llm=True
-            # )
-            print("生成器模型加载完成")
-
-            # 初始化RAG系统
-            print("Initializing RAG system...")
-            self.rag_system = RagSystem(
-                retriever=retriever,
-                generator=generator,
-                prompt_template="Context: {context}\nQuestion: {question}\nAnswer:",
-                retriever_top_k=1
-            )
+            use_gpu = torch.cuda.is_available()
+            print(f"CUDA available: {use_gpu}. Using {'GPU' if use_gpu else 'CPU'} for retriever.")
+            
+            # The call is now simple and clean, with correct GPU detection.
+            self.rag_system = load_bilingual_rag_system(use_gpu=use_gpu)
+            print("RAG system initialized.")
 
         except Exception as e:
             print(f"初始化过程中出错: {str(e)}")
             traceback.print_exc()
-            raise e
 
-    def process_query(self, query: str):  # 移除了 datasource 参数，因为控制台模式下通常不需要选择
+    def process_query(self, query: str):
         """Process a query and return results"""
         try:
+            # print(f"处理查询: {query}") # Per user request, removed this log
             if self.rag_system is None:
-                self.init_model()
+                print("RAG system not initialized.")
+                return
 
-            print(f"处理查询: {query}")
+            # print(f"处理查询: {query}")
             rag_output = self.rag_system.run(user_input=query)
 
             # 准备输出

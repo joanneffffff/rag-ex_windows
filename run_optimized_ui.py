@@ -19,9 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from xlm.utils.unified_data_loader import UnifiedDataLoader
 from xlm.registry.generator import load_generator
-from xlm.components.rag_system.rag_system import RagSystem
-from xlm.components.retriever.sbert_retriever import SBERTRetriever
-from xlm.components.encoder.multimodal_encoder import MultiModalEncoder
+from xlm.registry.rag_system import load_bilingual_rag_system
 from config.parameters import Config, EncoderConfig, RetrieverConfig, ModalityConfig, config
 
 # Ignore warnings
@@ -109,59 +107,23 @@ def generate_response(model, tokenizer, query, history=None):
 
 class OptimizedUI:
     def __init__(self):
-        self.model = None
-        self.tokenizer = None
-        self.data_loader = UnifiedDataLoader(
-            batch_size=16,  # 可选：如需统一也可用config.encoder.batch_size
-            max_samples=500,  # 可选
-            cache_dir=config.encoder.cache_dir
-        )
-        self.documents = self.data_loader.documents
+        # The data loader and generator are now initialized inside load_bilingual_rag_system
         self.rag_system = None
         
     def init_model(self):
         """Initialize the model and system components"""
-        if self.model is not None:
+        if self.rag_system is not None:
             return
             
         try:
-            # 初始化检索器
-            print("Initializing retriever...")
-            encoder = MultiModalEncoder(
-                config=config,
-                use_enhanced_encoders=True
-            )
-            retriever = SBERTRetriever(
-                encoder=encoder,
-                corpus_documents=self.documents
-            )
+            use_gpu = torch.cuda.is_available()
+            print(f"Initializing RAG system (GPU available: {use_gpu}). This may take a moment...")
             
-            # 初始化生成器
-            print(f"加载生成器模型: {config.generator.model_name}")
-            generator = load_generator(
-                generator_model_name=config.generator.model_name,
-                use_local_llm=True
+            # This is the correct, self-contained call, mirroring run_local_test.py
+            self.rag_system = load_bilingual_rag_system(
+                use_gpu=use_gpu
             )
-            # --- To use Qwen3-8B as the generator model, uncomment below ---
-            # generator = load_generator(
-            #     generator_model_name="Qwen/Qwen3-8B",
-            #     use_local_llm=True
-            # )
-            # --- To use Fin-R1 as the generator model, uncomment below ---
-            # generator = load_generator(
-            #     generator_model_name="SUFE-AIFLM-Lab/Fin-R1",
-            #     use_local_llm=True
-            # )
-            print("生成器模型加载完成")
-            
-            # 初始化RAG系统
-            print("Initializing RAG system...")
-            self.rag_system = RagSystem(
-                retriever=retriever,
-                generator=generator,
-                prompt_template="Context: {context}\nQuestion: {question}\nAnswer:",
-                retriever_top_k=1
-            )
+            print("RAG system initialized successfully.")
             
         except Exception as e:
             print(f"Error during initialization: {str(e)}")
@@ -173,24 +135,18 @@ class OptimizedUI:
         try:
             # 运行RAG系统
             rag_output = self.rag_system.run(user_input=query)
+
+            if not rag_output.retrieved_documents:
+                return "No relevant documents found.", "Could not find any relevant context for the query."
+
             answer = rag_output.generated_responses[0]
             doc = rag_output.retrieved_documents[0]
             score = rag_output.retriever_scores[0]
-            # 检测问题语言
-            question_is_chinese = any('\u4e00' <= ch <= '\u9fff' for ch in query)
-            # 构建响应
-            if question_is_chinese:
-                # 中文问题，界面全部中文
-                response = {
-                    "answer": answer,
-                    "context": f"相关度分数: {score:.4f}\n\n{doc.content}"
-                }
-            else:
-                # 英文问题，答案为英文，界面标签中文
-                response = {
-                    "answer": answer,
-                    "context": f"相关度分数: {score:.4f}\n\n{doc.content}"
-                }
+
+            response = {
+                "answer": answer,
+                "context": f"Relevance Score: {score:.4f}\n\n{doc.content}"
+            }
             return response["answer"], response["context"]
         except Exception as e:
             print(f"Error processing query: {str(e)}")
@@ -244,7 +200,7 @@ class OptimizedUI:
                 examples=[
                     ["What does the Weighted average actuarial assumptions consist of?"],
                     ["How much is the 2019 rate of inflation?"],
-                    ["我是一位股票分析师，我需要利用以下新闻信息来更好地完成金融分析，请你对下列新闻提取出可能对我有帮助的关键信息，形成更精简的新闻摘要。新闻具体内容如下："],
+                    ["How much more revenue does the company have in Asia have over Europe for 2019?"],
                     ["我是一位股票分析师，我需要利用以下新闻信息来更好地完成金融分析，请你对下列新闻提取出可能对我有帮助的关键信息，形成更精简的新闻摘要。新闻具体内容如下："]
                 ],
                 inputs=query,

@@ -4,6 +4,26 @@ from xlm.dto.dto import RagOutput
 import os
 import collections
 import re
+from langdetect import detect, LangDetectException
+
+# Define the robust "Golden Prompts" directly in the code
+PROMPT_TEMPLATE_EN = """You are a professional financial analyst. Answer the following question in English based only on the provided context. If the context does not contain the answer, state that the answer cannot be found in the provided context.
+
+Context:
+{context}
+
+Question: {question}
+
+Answer:"""
+
+PROMPT_TEMPLATE_ZH = """你是一个专业的金融分析师。请仅根据提供的上下文，用中文回答以下问题。如果上下文中没有答案，请明确指出在提供的上下文中找不到答案。
+
+上下文:
+{context}
+
+问题: {question}
+
+回答:"""
 
 
 class RagSystem:
@@ -11,158 +31,71 @@ class RagSystem:
         self,
         retriever: Retriever,
         generator: Generator,
-        prompt_template: str,
         retriever_top_k: int,
+        prompt_template: str = None, # No longer used, but kept for compatibility
     ):
         self.retriever = retriever
         self.generator = generator
-        self.prompt_template = prompt_template
+        # self.prompt_template is now obsolete
         self.retriever_top_k = retriever_top_k
 
-    def _select_prompt_template(self, doc_sources, task_type="qa"):
-        """
-        根据文档来源和任务类型选择prompt模板文件路径。
-        task_type: "qa"/"table"/"paragraph"/"news"/"time_series"
-        """
-        # TatQA 英文模板
-        tatqa_map = {
-            "qa": "tatqa_qa.txt",
-            "table": "tatqa_table.txt",
-            "paragraph": "tatqa_paragraph.txt"
-        }
-        # AlphaFin 中文模板
-        alphafin_map = {
-            "news": "alphafin_financial_news.txt",
-            "qa": "alphafin_stock_qa.txt",
-            "time_series": "alphafin_time_series.txt"
-        }
-        prompt_dir = "data/prompt_templates"
-        # 简单判断
-        if any("tatqa" in src.lower() for src in doc_sources):
-            fname = tatqa_map.get(task_type, "tatqa_qa.txt")
-        elif any("stock_data" in src or "time_series" in src or "financial_news" in src for src in doc_sources):
-            # AlphaFin
-            if any("time_series" in src for src in doc_sources):
-                fname = alphafin_map["time_series"]
-            elif any("financial_news" in src for src in doc_sources):
-                fname = alphafin_map["news"]
-            else:
-                fname = alphafin_map["qa"]
-        else:
-            fname = "tatqa_qa.txt"  # fallback
-        return os.path.join(prompt_dir, fname)
-
-    def _load_prompt_template(self, template_path):
-        try:
-            with open(template_path, "r", encoding="utf-8") as f:
-                return f.read()
-        except Exception:
-            return self.prompt_template
-
-    def is_chinese(self, text):
-        return bool(re.search(r'[\u4e00-\u9fff]', text))
-
     def run(self, user_input: str) -> RagOutput:
-        # 检测问题语言
-        question_is_chinese = self.is_chinese(user_input)
+        # 1. Detect language of the user's question
+        try:
+            lang = detect(user_input)
+        except LangDetectException:
+            lang = 'en' # Default to English if detection fails
+
+        is_chinese_q = lang.startswith('zh')
         
-        # 全量检索
+        # 2. Retrieve relevant documents
         retrieved_documents, retriever_scores = self.retriever.retrieve(
-            text=user_input, top_k=10, return_scores=True
+            text=user_input, top_k=self.retriever_top_k, return_scores=True
         )
-        # 根据问题语言过滤检索结果
-        if question_is_chinese:
-            filtered = [(doc, score) for doc, score in zip(retrieved_documents, retriever_scores) if 'alpha' in doc.metadata.source.lower()]
+
+        # 3. Select prompt based on question language and format the context
+        if is_chinese_q:
+            prompt_template = PROMPT_TEMPLATE_ZH
+            no_context_message = "未找到合适的语料，请检查数据源。"
         else:
-            filtered = [(doc, score) for doc, score in zip(retrieved_documents, retriever_scores) if 'tatqa' in doc.metadata.source.lower()]
-        if not filtered:
+            prompt_template = PROMPT_TEMPLATE_EN
+            no_context_message = "No suitable context found for your question. Please check the data sources."
+
+        if not retrieved_documents:
             return RagOutput(
                 retrieved_documents=[],
                 retriever_scores=[],
                 prompt="",
-                generated_responses=["未找到合适的语料，请检查数据源。" if question_is_chinese else "No suitable context found for your question. Please check the data sources."],
+                generated_responses=[no_context_message],
                 metadata={}
             )
-        retrieved_documents, retriever_scores = zip(*filtered)
-        retrieved_documents = list(retrieved_documents)[:self.retriever_top_k]
-        retriever_scores = list(retriever_scores)[:self.retriever_top_k]
-        doc_sources = [doc.metadata.source for doc in retrieved_documents]
-        # 简单任务类型推断
-        if any("table" in src for src in doc_sources):
-            task_type = "table"
-        elif any("paragraph" in src for src in doc_sources):
-            task_type = "paragraph"
-        elif any("news" in src for src in doc_sources):
-            task_type = "news"
-        elif any("time_series" in src for src in doc_sources):
-            task_type = "time_series"
-        else:
-            task_type = "qa"
-        # 动态选择prompt模板：中文问题用AlphaFin模板，英文问题用TatQA模板
-        if question_is_chinese:
-            # AlphaFin中文模板
-            alphafin_map = {
-                "news": "alphafin_financial_news.txt",
-                "qa": "alphafin_stock_qa.txt",
-                "time_series": "alphafin_time_series.txt"
-            }
-            prompt_dir = "data/prompt_templates"
-            fname = alphafin_map.get(task_type, "alphafin_stock_qa.txt")
-            template_path = os.path.join(prompt_dir, fname)
-        else:
-            # TatQA英文模板
-            tatqa_map = {
-                "qa": "tatqa_qa.txt",
-                "table": "tatqa_table.txt",
-                "paragraph": "tatqa_paragraph.txt"
-            }
-            prompt_dir = "data/prompt_templates"
-            fname = tatqa_map.get(task_type, "tatqa_qa.txt")
-            template_path = os.path.join(prompt_dir, fname)
-        prompt_template = self._load_prompt_template(template_path)
-        document_contents = [doc.content for doc in retrieved_documents]
-        # 收集所有metadata字段
-        extra_kwargs = {}
-        for doc in retrieved_documents:
-            if doc.metadata and isinstance(doc.metadata, dict):
-                extra_kwargs.update(doc.metadata)
-        # 兜底：用defaultdict防止KeyError
-        safe_kwargs = dict(extra_kwargs)
-        safe_kwargs["context"] = "\n".join(document_contents)
-        safe_kwargs["question"] = user_input
-        # 兜底：为所有常见模板变量提供默认值，防止KeyError
-        for key in [
-            "answer", "answer_type", "scale", "derivation", "table_content", "paragraph", "stock_code", "date", "raw_data", "indicator", "word_count", "sentence_count"
-        ]:
-            if key not in safe_kwargs:
-                safe_kwargs[key] = ""
-        prompt = prompt_template.format_map(safe_kwargs)
-        # 优化prompt语言一致性
-        def is_context_chinese(context):
-            return any(re.search(r'[\u4e00-\u9fff]', c) for c in context)
-        context_is_chinese = is_context_chinese(document_contents)
-        # 根据问题语言加前缀指令，并多次强调
-        if question_is_chinese:
-            prefix = "请用中文回答。"
-            if not context_is_chinese:
-                prefix += "（上下文为英文，但请务必用中文作答。）"
-            prompt = f"{prefix}\n请务必用中文作答。\n" + prompt + "\n请再次确认你的回答是中文。"
-        else:
-            prefix = "Please answer in English."
-            if context_is_chinese:
-                prefix += " (The context is in Chinese, but please answer in English.)"
-            prompt = f"{prefix}\nYour answer must be in English only.\n" + prompt + "\nDouble check your answer is in English."
+
+        context_str = "\n\n".join([doc.content for doc in retrieved_documents])
+        
+        # 4. Create the final prompt
+        prompt = prompt_template.format(context=context_str, question=user_input)
+        
+        # 5. Generate the response
         generated_responses = self.generator.generate(texts=[prompt])
+        
+        # 6. Gather metadata
+        retriever_model_name = ""
+        if hasattr(self.retriever, 'encoder_en') and hasattr(self.retriever, 'encoder_ch'):
+            if is_chinese_q:
+                retriever_model_name = self.retriever.encoder_ch.model.name_or_path
+            else:
+                retriever_model_name = self.retriever.encoder_en.model.name_or_path
+
         return RagOutput(
             retrieved_documents=retrieved_documents,
             retriever_scores=retriever_scores,
             prompt=prompt,
             generated_responses=generated_responses,
             metadata=dict(
-                retriever_model_name=self.retriever.encoder.model_name,
+                retriever_model_name=retriever_model_name,
                 top_k=self.retriever_top_k,
                 generator_model_name=self.generator.model_name,
-                prompt_template=prompt_template,
-                question_language="zh" if question_is_chinese else "en"
+                prompt_template="Golden-" + ("ZH" if is_chinese_q else "EN"),
+                question_language="zh" if is_chinese_q else "en"
             ),
         )

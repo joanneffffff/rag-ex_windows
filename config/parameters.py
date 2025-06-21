@@ -3,33 +3,40 @@ Configuration parameters for the RAG system.
 """
 
 import os
+import platform
+import torch
 from dataclasses import dataclass, field
 from typing import Dict, Optional, List
+
+# --- Platform-Aware Path Configuration ---
+# Set the default Hugging Face cache directory based on the operating system.
+# You can modify the Windows path here if needed (e.g., "D:/AI/huggingface").
+WINDOWS_CACHE_DIR = "M:/huggingface"
+LINUX_CACHE_DIR = "/users/sgjfei3/data/huggingface"
+
+DEFAULT_CACHE_DIR = WINDOWS_CACHE_DIR if platform.system() == "Windows" else LINUX_CACHE_DIR
 
 @dataclass
 class EncoderConfig:
     # model_name: str = "all-MiniLM-L6-v2"
     model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    # cache_dir: str = "M:/huggingface"
-    cache_dir: str = "D:/AI/huggingface"
+    cache_dir: str = DEFAULT_CACHE_DIR
     device: Optional[str] = None  # Will auto-detect if None
     batch_size: int = 32
     max_length: int = 512
 
 @dataclass
 class RetrieverConfig:
-    use_faiss: bool = False
+    use_faiss: bool = True  # Changed default to True for efficiency
     num_threads: int = 4
     batch_size: int = 32
-    use_gpu: bool = False
+    use_gpu: bool = torch.cuda.is_available() # Dynamically set default based on hardware
     max_context_length: int = 100
 
 @dataclass
 class DataConfig:
-    news_data_path: str = "data/news"
-    stock_data_path: str = "data/stock"
-    table_data_path: str = "data/tables"
-    time_series_path: str = "data/timeseries"
+    data_dir: str = "data"  # Unified root data directory
+    max_samples: int = 500 # Max samples to load from each dataset
 
 @dataclass
 class ModalityConfig:
@@ -46,18 +53,25 @@ class SystemConfig:
 
 @dataclass
 class GeneratorConfig:
-    model_name: str = "Qwen/Qwen3-0.6B"
-    # cache_dir: str = "M:/huggingface"
-    cache_dir: str = "D:/AI/huggingface"
+    model_name: str = "Qwen/Qwen2-1.5B-Instruct"
+    cache_dir: str = DEFAULT_CACHE_DIR
 
 @dataclass
 class Config:
+    cache_dir: str = DEFAULT_CACHE_DIR # Global cache directory
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     data: DataConfig = field(default_factory=DataConfig)
     modality: ModalityConfig = field(default_factory=ModalityConfig)
     system: SystemConfig = field(default_factory=SystemConfig)
     generator: GeneratorConfig = field(default_factory=GeneratorConfig)
+
+    def __post_init__(self):
+        # Propagate the global cache_dir to other configs if they have it
+        if hasattr(self.encoder, 'cache_dir'):
+            self.encoder.cache_dir = self.cache_dir
+        if hasattr(self.generator, 'cache_dir'):
+            self.generator.cache_dir = self.cache_dir # Bug fix: Correctly assign global cache_dir
 
     @classmethod
     def load_environment_config(cls) -> 'Config':

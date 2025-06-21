@@ -2,7 +2,7 @@ import os
 from typing import List, Optional
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from xlm.components.generator.generator import Generator
 
@@ -11,15 +11,14 @@ class LocalLLMGenerator(Generator):
     def __init__(
         self,
         model_name: str = "facebook/opt-125m",
-        device: Optional[str] = None,
+        device: str = "cpu",
         temperature: float = 0.7,
         max_new_tokens: int = 100,
         top_p: float = 0.9,
-        # cache_dir: str = "D:/AI/huggingface"
         cache_dir: str = "M:/huggingface"
     ):
         super().__init__(model_name=model_name)
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
         self.top_p = top_p
@@ -36,6 +35,7 @@ class LocalLLMGenerator(Generator):
         
         # 加载模型和tokenizer
         self._load_model_and_tokenizer()
+        print(f"LocalLLMGenerator '{model_name}' loaded on {self.device}.")
         
     def _load_model_and_tokenizer(self):
         """加载模型和tokenizer"""
@@ -47,74 +47,55 @@ class LocalLLMGenerator(Generator):
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
             
+        # Prepare model loading arguments
+        model_kwargs = {
+            "cache_dir": self.cache_dir,
+            "low_cpu_mem_usage": True,
+            "use_cache": True,
+        }
+
+        # Only apply quantization if on a CUDA GPU
+        if self.device == 'cuda':
+            print("CUDA device detected. Applying 4-bit quantization...")
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=False,
+            )
+            model_kwargs["quantization_config"] = quantization_config
+            model_kwargs["device_map"] = "auto" # Recommended for quantization
+        else:
+            print("CPU device detected. Loading model without quantization.")
+            model_kwargs["device_map"] = "cpu"
+            model_kwargs["torch_dtype"] = torch.float32
+
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
-            cache_dir=self.cache_dir,
-            torch_dtype=torch.float32,
-            device_map="auto",
-            low_cpu_mem_usage=True,
-            use_cache=True
+            **model_kwargs
         )
         
     def generate(self, texts: List[str]) -> List[str]:
-        """
-        生成回答
-        Args:
-            texts: 输入提示列表
-        Returns:
-            生成的回答列表
-        """
         responses = []
-        
-        for prompt in texts:
-            # 准备输入
-            inputs = self.tokenizer(
-                prompt, 
-                return_tensors="pt",
-                truncation=True,
-                max_length=512,
-                padding=True
-            ).to(self.device)
+        for text in texts:
+            # Tokenize and generate
+            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=1024)
+            input_ids = inputs["input_ids"].to(self.device)
+            attention_mask = inputs["attention_mask"].to(self.device)
             
-            # 记录输入长度
-            input_length = inputs["input_ids"].shape[1]
+            # Generate with increased length
+            outputs = self.model.generate(
+                input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=150,  # Increased from a smaller default
+                do_sample=True,
+                top_p=0.9,
+                temperature=0.6,
+                pad_token_id=self.tokenizer.eos_token_id  # Use eos_token_id for padding
+            )
             
-            # 生成回答
-            with torch.no_grad():
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=self.max_new_tokens,
-                    temperature=self.temperature,
-                    top_p=self.top_p,
-                    num_beams=4,  # 使用beam search
-                    no_repeat_ngram_size=3,  # 避免重复
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                    use_cache=True,
-                    do_sample=False  # 使用确定性生成
-                )
-            
-            # 只解码新生成的token
-            new_tokens = outputs[0][input_length:]
-            response = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-            
-            # 如果响应为空或不完整，尝试重新生成
-            if not response or len(response) < 5:
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=self.max_new_tokens * 2,  # 增加生成长度
-                    temperature=self.temperature * 2,  # 增加随机性
-                    top_p=self.top_p,
-                    num_beams=1,
-                    no_repeat_ngram_size=3,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                    use_cache=True,
-                    do_sample=True
-                )
-                new_tokens = outputs[0][input_length:]
-                response = self.tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
-            
-            responses.append(response)
+            # Decode the response
+            response = self.tokenizer.decode(outputs[0][input_ids.shape[1]:], skip_special_tokens=True)
+            responses.append(response.strip())
             
         return responses 
