@@ -45,6 +45,7 @@ def generate_questions(
     device: str,
     batch_size: int,
     limit: int,
+    save_interval: int,
 ):
     """
     Main function to generate questions for the AlphaFin dataset.
@@ -78,7 +79,9 @@ def generate_questions(
     
     # --- 4. Generate Questions in Batches ---
     print(f"Generating questions for {len(cleaned_data)} articles in batches of {batch_size}...")
-    for i in tqdm(range(0, len(cleaned_data), batch_size), desc="Generating Questions"):
+    
+    # We use enumerate to get a batch index for periodic saving
+    for batch_idx, i in enumerate(tqdm(range(0, len(cleaned_data), batch_size), desc="Generating Questions")):
         batch_records = cleaned_data[i:i+batch_size]
         
         messages_batch = []
@@ -143,9 +146,17 @@ def generate_questions(
                     'context': record.get('context', '').strip(),
                     'answer': record.get('answer', '').strip()
                 })
+        
+        # --- Periodic Saving ---
+        # Save after every `save_interval` batches
+        if (batch_idx + 1) % save_interval == 0 and final_rag_data:
+            print(f"\n--- Periodic Save: Saving {len(final_rag_data)} records at batch {batch_idx+1} ---")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(final_rag_data, f, ensure_ascii=False, indent=4)
 
-    # --- 5. Save Data ---
-    print(f"Saving {len(final_rag_data)} new RAG-ready records to {output_path}...")
+    # --- 5. Final Save ---
+    print(f"\nFinal Save: Saving all {len(final_rag_data)} new RAG-ready records to {output_path}...")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(final_rag_data, f, ensure_ascii=False, indent=4)
@@ -164,6 +175,7 @@ if __name__ == '__main__':
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to run on ('cuda' or 'cpu').")
     parser.add_argument("--batch_size", type=int, default=1, help="Batch size for generation (use a smaller value for CPU).")
     parser.add_argument("--limit", type=int, default=None, help="Number of records to process for testing.")
+    parser.add_argument("--save_interval", type=int, default=50, help="Save progress every N batches.")
     
     args = parser.parse_args()
 
@@ -180,5 +192,6 @@ if __name__ == '__main__':
         model_name=args.model_name,
         device=args.device,
         batch_size=args.batch_size,
-        limit=args.limit
+        limit=args.limit,
+        save_interval=args.save_interval
     ) 
