@@ -23,7 +23,7 @@ def load_model_and_tokenizer(model_name: str, device: str):
             bnb_4bit_use_double_quant=False,
         )
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True, padding_side='left')
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         quantization_config=bnb_config,
