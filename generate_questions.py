@@ -98,7 +98,10 @@ def generate_questions(
 
         prompts = [
             tokenizer.apply_chat_template(
-                conversation=m, tokenize=False, add_generation_prompt=True
+                conversation=m,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,  # Disable complex reasoning for this direct task
             ) for m in messages_batch
         ]
 
