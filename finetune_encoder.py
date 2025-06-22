@@ -11,7 +11,10 @@ def load_qc_pairs(jsonl_path, max_samples=None):
             if max_samples and i >= max_samples:
                 break
             item = json.loads(line)
-            q = item['query'].strip()
+            if 'question' in item:
+                q = item['question'].strip()
+            elif 'query' in item:
+                q = item['query'].strip()
             c = item['context'].strip()
             if q and c:
                 pairs.append(InputExample(texts=[q, c], label=1.0))
