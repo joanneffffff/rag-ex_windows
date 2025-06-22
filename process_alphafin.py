@@ -110,5 +110,127 @@ def process_alphafin_data():
     except Exception as e:
         print(f'An unexpected error occurred: {e}')
 
-if __name__ == '__main__':
-    process_alphafin_data() 
+def extract_info_from_context(context):
+    company = None
+    stock_code = None
+    date = None
+    # 1. "这是以XXX（YYYYYY）"或"这是以XXX（YYYYYY）："
+    m = re.match(r"^这是以([\u4e00-\u9fa5A-Za-z0-9·（）()\-]+)[（(]([0-9]{6})[)）]", context)
+    if m:
+        company = m.group(1).strip()
+        stock_code = m.group(2)
+    else:
+        m2 = re.match(r"^以下数据是([\u4e00-\u9fa5A-Za-z0-9·（）()\-]+)", context)
+        if m2:
+            company_full = m2.group(1).strip()
+            m_code = re.search(r"([\u4e00-\u9fa5A-Za-z0-9·（）()\-]+?)(\d{6}\.(SZ|SH))", company_full)
+            if m_code:
+                company = m_code.group(1).strip()
+                stock_code = m_code.group(2)
+            else:
+                m_code2 = re.search(r"([\u4e00-\u9fa5A-Za-z0-9·（）()\-]+?)(\d{6})", company_full)
+                if m_code2:
+                    company = m_code2.group(1).strip()
+                    stock_code = m_code2.group(2)
+                else:
+                    company = re.split(r"的|时间为|:|：", company_full)[0].strip()
+        # 股票代码兜底
+        if not stock_code:
+            m_code = re.search(r"(\d{6}\.(SZ|SH))", context)
+            if m_code:
+                stock_code = m_code.group(1)
+            else:
+                m_code2 = re.search(r"[（(](\d{6})[)）]", context)
+                if m_code2:
+                    stock_code = m_code2.group(1)
+    # 股票代码补全后缀
+    if stock_code and re.fullmatch(r"\d{6}", stock_code):
+        # 在context中查找完整代码
+        m_full = re.search(rf"{stock_code}\.(SZ|SH)", context)
+        if m_full:
+            stock_code = f"{stock_code}.{m_full.group(1)}"
+    # 时间
+    m_date = re.search(r"时间为(\d{4}-\d{2}-\d{2})", context)
+    if m_date:
+        date = m_date.group(1)
+    else:
+        m_date2 = re.search(r"(\d{4}-\d{2}-\d{2})", context)
+        if m_date2:
+            date = m_date2.group(1)
+    return company, stock_code, date
+
+def clean_instruction(text):
+    # 删除instruction部分
+    patterns = [
+        r"你是一个股票分析师.*?数据如下：",
+        r"请根据以下内容回答问题：",
+        r"【问题】：.*?。",
+        r"数据如下：",
+    ]
+    for pat in patterns:
+        text = re.sub(pat, '', text, flags=re.DOTALL)
+    return text.strip()
+
+def kv_textify(context):
+    # 尝试将dict或json字符串转为k-v文本
+    if isinstance(context, dict):
+        return '；'.join([f"{k}: {v}" for k, v in context.items()])
+    try:
+        ctx = json.loads(context)
+        if isinstance(ctx, dict):
+            return '；'.join([f"{k}: {v}" for k, v in ctx.items()])
+    except Exception:
+        pass
+    return context
+
+def replace_company_in_question(question, company, stock_code=None):
+    if not company:
+        return question
+    if stock_code:
+        company_full = f"{company}（{stock_code}）"
+    else:
+        company_full = company
+    fuzzy_words = ["公司", "该股票", "该股", "股票", "这个股票", "这只股票", "该公司"]
+    for word in fuzzy_words:
+        # 允许句首或非中文/数字/字母前缀，确保原词被完整替换
+        question = re.sub(
+            rf'(^|[^\u4e00-\u9fa5A-Za-z0-9]){word}(?![\u4e00-\u9fa5A-Za-z0-9])',
+            lambda m: (m.group(1) if m.group(1) else '') + company_full,
+            question
+        )
+    return question
+
+def process_alphafin_contexts(input_path, output_path):
+    with open(input_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    new_data = []
+    for idx, item in enumerate(data):
+        question = item.get('question', '')
+        context = item.get('context', '')
+        company, stock_code, date = extract_info_from_context(context)
+        replaced_question = replace_company_in_question(question, company, stock_code)
+        # 打印调试信息
+        print(f"样例{idx+1}:")
+        print('原始question:', question)
+        print('提取公司名:', company)
+        print('提取股票代码:', stock_code)
+        print('替换后question:', replaced_question)
+        print('-'*40)
+        # 清理context
+        context_clean = clean_instruction(context)
+        context_clean = kv_textify(context_clean)
+        new_data.append({
+            'question': replaced_question,
+            'context': context_clean,
+            'answer': item.get('answer', '')
+        })
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(new_data, f, ensure_ascii=False, indent=2)
+    print(f"处理完成，输出到{output_path}")
+
+# 示例主函数
+if __name__ == "__main__":
+    process_alphafin_contexts(
+        input_path='data/alphafin/alphafin_rag_ready_generated.json',
+        output_path='data/alphafin/alphafin_rag_ready_generated_cleaned.json'
+    ) 

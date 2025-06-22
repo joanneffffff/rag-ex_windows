@@ -74,7 +74,6 @@ class OptimizedConsoleQA:  # 将类名更改为更具描述性
     def process_query(self, query: str):
         """Process a query and return results"""
         try:
-            # print(f"处理查询: {query}") # Per user request, removed this log
             if self.rag_system is None:
                 print("RAG system not initialized.")
                 return
@@ -90,7 +89,7 @@ class OptimizedConsoleQA:  # 将类名更改为更具描述性
             # 构建响应
             response = {
                 "answer": answer,
-                "context": f"相关度分数: {score:.4f}\n\n{doc.content}"
+                "context": f"relevance: {score:.4f}\n\n{doc.content}"
             }
 
             return response["answer"], response["context"]
