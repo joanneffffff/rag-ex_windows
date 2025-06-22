@@ -98,6 +98,7 @@ class MRREvaluator(SentenceEvaluator):
             mrr = 0.0
         else:
             print(f"编码 {len(self.contexts)} 个评估上下文...")
+            # >>>>> 这里是修正过的行 <<<<<
             context_embeddings = model.encode(self.contexts, batch_size=64, convert_to_tensor=True,
                                               show_progress_bar=self.show_progress_bar)
 
@@ -185,12 +186,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, required=True, help='预训练模型名或路径')
     parser.add_argument('--train_jsonl', type=str, required=True, help='训练数据jsonl文件路径')
-    parser.add_argument('--eval_jsonl', type=str, required=True, help='评估数据jsonl文件路径') # <--- 这一行必须存在
+    parser.add_argument('--eval_jsonl', type=str, required=True, help='评估数据jsonl文件路径') 
     parser.add_argument('--output_dir', type=str, required=True, help='微调模型输出目录')
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--max_samples', type=int, default=None, help='训练和评估的最大样本数')
-    parser.add_argument('--eval_steps', type=int, default=0, help='每隔多少训练步评估一次 (0表示只在每个epoch结束时评估)') # <--- 这一行也必须存在
+    parser.add_argument('--eval_steps', type=int, default=0, help='每隔多少训练步评估一次 (0表示只在每个epoch结束时评估)') 
     
     args = parser.parse_args()
 
