@@ -72,9 +72,9 @@ def replace_context_prompt_with_regex(file_path: str):
     except Exception as e:
         print(f"写入文件时发生错误：{e}")
 
-json_file_path = 'data/alphafin/alphafin_rag_ready_generated_cleaned.json'
-replace_context_prompt_with_regex(json_file_path)
-print("remove_specific_questions done")
+# json_file_path = 'data/alphafin/alphafin_rag_ready_generated_cleaned.json'
+# replace_context_prompt_with_regex(json_file_path)
+# print("remove_specific_questions done")
 
 input_path = 'data/alphafin/alphafin_rag_ready_generated_cleaned.json'
 output_dir = 'evaluate_mrr'
