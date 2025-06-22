@@ -21,7 +21,7 @@ def finetune_encoder(model_name, train_jsonl, output_dir, batch_size=32, epochs=
     train_examples = load_qc_pairs(train_jsonl, max_samples)
     model = SentenceTransformer(model_name)
     train_dataloader = DataLoader(train_examples, shuffle=True, batch_size=batch_size)
-    train_loss = losses.CosineSimilarityLoss(model)
+    train_loss = losses.MultipleNegativesRankingLoss(model)
     model.fit(
         train_objectives=[(train_dataloader, train_loss)],
         epochs=epochs,
