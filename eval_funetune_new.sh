@@ -42,31 +42,31 @@ echo "--- 3. TatQA 微调后模型评测 ---"
 python run_encoder_eval.py --model_name models/finetuned_tatqa_en --eval_jsonl evaluate_mrr/tatqa_eval.jsonl --max_samples 1000 --print_examples 3
 echo ""
 
-# ---
-# 4. AlphaFin中文Encoder评测
-echo "--- 4. AlphaFin 中文Encoder预训练模型评测 ---"
-python run_encoder_eval.py --model_name Langboat/mengzi-bert-base-fin --eval_jsonl evaluate_mrr/alphafin_eval.jsonl --max_samples 1000 --print_examples 3
-echo ""
+# # ---
+# # 4. AlphaFin中文Encoder评测
+# echo "--- 4. AlphaFin 中文Encoder预训练模型评测 ---"
+# python run_encoder_eval.py --model_name Langboat/mengzi-bert-base-fin --eval_jsonl evaluate_mrr/alphafin_eval.jsonl --max_samples 1000 --print_examples 3
+# echo ""
 
-# ---
-# 5. AlphaFin中文Encoder微调（每个epoch输出Loss和MRR）
-echo "--- 5. AlphaFin 中文Encoder模型微调 ---"
-python finetune_encoder.py \
-    --model_name Langboat/mengzi-bert-base-fin \
-    --train_jsonl evaluate_mrr/alphafin_train_qc.jsonl \
-    --eval_jsonl evaluate_mrr/alphafin_eval.jsonl \
-    --output_dir models/finetuned_alphafin_zh \
-    --batch_size 32 \
-    --epochs 5 \
-    --max_samples 10000 \
-    --eval_steps 0
-echo ""
+# # ---
+# # 5. AlphaFin中文Encoder微调（每个epoch输出Loss和MRR）
+# echo "--- 5. AlphaFin 中文Encoder模型微调 ---"
+# python finetune_encoder.py \
+#     --model_name Langboat/mengzi-bert-base-fin \
+#     --train_jsonl evaluate_mrr/alphafin_train_qc.jsonl \
+#     --eval_jsonl evaluate_mrr/alphafin_eval.jsonl \
+#     --output_dir models/finetuned_alphafin_zh \
+#     --batch_size 32 \
+#     --epochs 5 \
+#     --max_samples 10000 \
+#     --eval_steps 0
+# echo ""
 
-# ---
-# 6. AlphaFin微调后再评测
-echo "--- 6. AlphaFin 微调后模型评测 ---"
-python run_encoder_eval.py --model_name models/finetuned_alphafin_zh --eval_jsonl evaluate_mrr/alphafin_eval.jsonl --max_samples 1000 --print_examples 3
-echo ""
+# # ---
+# # 6. AlphaFin微调后再评测
+# echo "--- 6. AlphaFin 微调后模型评测 ---"
+# python run_encoder_eval.py --model_name models/finetuned_alphafin_zh --eval_jsonl evaluate_mrr/alphafin_eval.jsonl --max_samples 1000 --print_examples 3
+# echo ""
 
 echo "------------------------------------"
 echo "所有任务完成！"
