@@ -3,136 +3,158 @@ import json
 import os
 import re
 from tqdm import tqdm
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModel, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModel, AutoModelForCausalLM, BitsAndBytesConfig 
 import torch
 import torch.nn.functional as F
 from collections import defaultdict
-import ast # 导入 ast 模块
+import ast 
 
-# --- Utility Function for Context Conversion (from split_alphafin_data.py) ---
+# --- Utility Function for Context Conversion (保持不变) ---
 def convert_json_context_to_natural_language_chunks(json_str_context, company_name="公司"):
     """
     Parses a JSON string context from AlphaFin and converts it into a list of
     natural language chunks, handling various formats and cleaning.
     """
-    if not json_str_context:
-        return []
-
-    # Replace literal "\n" with actual newline character for proper parsing
-    processed_str_context = json_str_context.replace("\\n", "\n")
-
     chunks = []
     
-    # Attempt to parse as a list of dicts first
-    try:
-        data_list = json.loads(processed_str_context)
-        if isinstance(data_list, list):
-            for item in data_list:
-                if isinstance(item, dict):
-                    # Prefer 'content' if available, otherwise iterate through k-v pairs
-                    if 'content' in item and isinstance(item['content'], str):
-                        chunks.append(item['content'])
+    if not json_str_context or not json_str_context.strip():
+        return chunks
+
+    processed_str_context = json_str_context.replace("\\n", "\n")
+
+    cleaned_initial = re.sub(re.escape("【问题】:"), "", processed_str_context)
+    cleaned_initial = re.sub(re.escape("【答案】:"), "", cleaned_initial).strip()
+    
+    cleaned_initial = cleaned_initial.replace('，', ',')
+    cleaned_initial = cleaned_initial.replace('：', ':')
+    cleaned_initial = cleaned_initial.replace('【', '') 
+    cleaned_initial = cleaned_initial.replace('】', '') 
+    cleaned_initial = cleaned_initial.replace('\u3000', ' ')
+    cleaned_initial = cleaned_initial.replace('\xa0', ' ').strip()
+    cleaned_initial = re.sub(r'\s+', ' ', cleaned_initial).strip()
+
+    report_match = re.match(
+        r"这是以(.+?)为题目,在(\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?)日期发布的研究报告。研报内容如下: (.+)", 
+        cleaned_initial, 
+        re.DOTALL
+    )
+    
+    if report_match:
+        report_title_full = report_match.group(1).strip()
+        report_date = report_match.group(2).strip()
+        report_raw_content = report_match.group(3).strip() 
+
+        content_after_second_title_match = re.match(r"研报题目是:(.+)", report_raw_content, re.DOTALL)
+        if content_after_second_title_match:
+            report_content_preview = content_after_second_title_match.group(1).strip()
+        else:
+            report_content_preview = report_raw_content 
+            
+        report_content_preview = re.sub(re.escape("【问题】:"), "", report_content_preview)
+        report_content_preview = re.sub(re.escape("【答案】:"), "", report_content_preview).strip()
+        report_content_preview = re.sub(r'\s+', ' ', report_content_preview).strip() 
+
+        company_stock_match = re.search(r"(.+?)（(\d{6}\.\w{2})）", report_title_full)
+        company_info = ""
+        if company_stock_match:
+            report_company_name = company_stock_match.group(1).strip()
+            report_stock_code = company_stock_match.group(2).strip()
+            company_info = f"，公司名称：{report_company_name}，股票代码：{report_stock_code}"
+            report_title_main = re.sub(r"（\d{6}\.\w{2}）", "", report_title_full).strip()
+        else:
+            report_title_main = report_title_full
+
+        chunk_text = f"一份发布日期为 {report_date} 的研究报告，其标题是：“{report_title_main}”{company_info}。报告摘要内容：{report_content_preview.rstrip('...') if report_content_preview.endswith('...') else report_content_preview}。"
+        chunks.append(chunk_text)
+        return chunks 
+
+    extracted_dict_str = None
+    parsed_data = None 
+
+    temp_dict_search_str = re.sub(r"Timestamp\(['\"](.*?)['\"]\)", r"'\1'", cleaned_initial) 
+    all_dict_matches = re.findall(r"(\{.*?\})", temp_dict_search_str, re.DOTALL) 
+
+    for potential_dict_str in all_dict_matches:
+        cleaned_potential_dict_str = potential_dict_str.strip()
+        
+        json_compatible_str_temp = cleaned_potential_dict_str.replace("'", '"')
+        try:
+            parsed_data_temp = json.loads(json_compatible_str_temp)
+            if isinstance(parsed_data_temp, dict):
+                extracted_dict_str = cleaned_potential_dict_str
+                parsed_data = parsed_data_temp
+                break 
+        except json.JSONDecodeError:
+            pass 
+
+        fixed_for_ast_eval_temp = re.sub(
+            r"(?<!['\"\w.])\b(0[1-9]\d*)\b(?![\d.]|['\"\w.])", 
+            r"'\1'", 
+            cleaned_potential_dict_str
+        )
+        try:
+            parsed_data_temp = ast.literal_eval(fixed_for_ast_eval_temp)
+            if isinstance(parsed_data_temp, dict):
+                extracted_dict_str = cleaned_potential_dict_str
+                parsed_data = parsed_data_temp
+                break 
+        except (ValueError, SyntaxError):
+            pass 
+
+    if extracted_dict_str is not None and isinstance(parsed_data, dict):
+        for metric_name, time_series_data in parsed_data.items():
+            if not isinstance(metric_name, str):
+                metric_name = str(metric_name)
+
+            cleaned_metric_name = re.sub(r'（.*?）', '', metric_name).strip()
+            
+            if not isinstance(time_series_data, dict):
+                if time_series_data is not None and str(time_series_data).strip():
+                    chunks.append(f"{company_name}的{cleaned_metric_name}数据为：{time_series_data}。")
+                continue
+            if not time_series_data:
+                continue
+            
+            try:
+                sorted_dates = sorted(time_series_data.keys(), key=str)
+            except TypeError:
+                sorted_dates = [str(k) for k in time_series_data.keys()]
+                
+            description_parts = []
+            for date in sorted_dates:
+                value = time_series_data[date]
+                if isinstance(value, (int, float)):
+                    formatted_value = f"{value:.4f}".rstrip('0').rstrip('.') if isinstance(value, float) else str(value)
+                else:
+                    formatted_value = str(value)
+                description_parts.append(f"在{date}为{formatted_value}")
+            
+            if description_parts:
+                if len(description_parts) <= 3:
+                    full_description = f"{company_name}的{cleaned_metric_name}数据: " + "，".join(description_parts) + "。"
+                else:
+                    first_part = "，".join(description_parts[:3])
+                    last_part = "，".join(description_parts[-3:])
+                    if len(sorted_dates) > 6:
+                        full_description = f"{company_name}的{cleaned_metric_name}数据从{sorted_dates[0]}到{sorted_dates[-1]}，主要变化为：{first_part}，...，{last_part}。"
                     else:
-                        chunk_parts = []
-                        for k, v in item.items():
-                            if isinstance(v, str) and v.strip():
-                                chunk_parts.append(f"{k}: {v.strip()}")
-                            elif isinstance(v, (int, float)):
-                                chunk_parts.append(f"{k}: {v}")
-                        if chunk_parts:
-                            chunks.append("。".join(chunk_parts))
-                elif isinstance(item, str) and item.strip():
-                    chunks.append(item.strip())
-            if chunks:
-                final_context = "\n\n".join(chunks)
-                # Apply general cleaning to the final joined context
-                final_context = re.sub(r'【.*?】', '', final_context) # Remove specific brackets
-                final_context = re.sub(r'[\u3000\xa0]', ' ', final_context) # Replace unicode spaces
-                final_context = re.sub(r'\s+', ' ', final_context).strip() # Normalize all whitespace
-                return [final_context] # Return as a single chunk for simplicity in this case if joined
-    except json.JSONDecodeError:
-        pass # Not a valid JSON list, try other formats
+                        full_description = f"{company_name}的{cleaned_metric_name}数据: " + "，".join(description_parts) + "。"
+                chunks.append(full_description)
+        return chunks 
 
-    # Attempt to parse as a single dictionary
-    try:
-        data_dict = json.loads(processed_str_context)
-        if isinstance(data_dict, dict):
-            chunk_parts = []
-            if 'content' in data_dict and isinstance(data_dict['content'], str):
-                chunk_parts.append(data_dict['content'])
-            else:
-                for k, v in data_dict.items():
-                    if isinstance(v, str) and v.strip():
-                        chunk_parts.append(f"{k}: {v.strip()}")
-                    elif isinstance(v, (int, float)):
-                        chunk_parts.append(f"{k}: {v}")
-            if chunk_parts:
-                final_context = "。".join(chunk_parts)
-                final_context = re.sub(r'【.*?】', '', final_context)
-                final_context = re.sub(r'[\u3000\xa0]', ' ', final_context)
-                final_context = re.sub(r'\s+', ' ', final_context).strip()
-                return [final_context]
-    except json.JSONDecodeError:
-        pass # Not a valid JSON dict, try other formats
+    pure_text = cleaned_initial
+    pure_text = re.sub(r"^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?[_;]?", "", pure_text, 1).strip()
+    pure_text = re.sub(r"^[\u4e00-\u9fa5]+(?:/[\u4e00-\u9fa5]+)?\d{4}年\d{2}月\d{2}日\d{2}:\d{2}:\d{2}(?:据[\u4e00-\u9fa5]+?,)?\d{1,2}月\d{1,2}日,?", "", pure_text).strip()
+    pure_text = re.sub(r"^(?:市场资金进出)?截至周[一二三四五六日]收盘,?", "", pure_text).strip()
+    pure_text = re.sub(r"^[\u4e00-\u9fa5]+?中期净利预减\d+%-?\d*%(?:[\u4e00-\u9fa5]+?\d{1,2}月\d{1,2}日晚间公告,)?", "", pure_text).strip()
 
-    # Try literal_eval for cases that look like Python lists/dicts but not strict JSON
-    try:
-        parsed_data = ast.literal_eval(processed_str_context)
-        if isinstance(parsed_data, list):
-            for item in parsed_data:
-                if isinstance(item, dict):
-                    chunk_parts = []
-                    if 'content' in item and isinstance(item['content'], str):
-                        chunk_parts.append(item['content'])
-                    else:
-                        for k, v in item.items():
-                            if isinstance(v, str) and v.strip():
-                                chunk_parts.append(f"{k}: {v.strip()}")
-                            elif isinstance(v, (int, float)):
-                                chunk_parts.append(f"{k}: {v}")
-                    if chunk_parts:
-                        chunks.append("。".join(chunk_parts))
-                elif isinstance(item, str) and item.strip():
-                    chunks.append(item.strip())
-            if chunks:
-                final_context = "\n\n".join(chunks)
-                final_context = re.sub(r'【.*?】', '', final_context)
-                final_context = re.sub(r'[\u3000\xa0]', ' ', final_context)
-                final_context = re.sub(r'\s+', ' ', final_context).strip()
-                return [final_context]
-        elif isinstance(parsed_data, dict):
-            chunk_parts = []
-            if 'content' in parsed_data and isinstance(parsed_data['content'], str):
-                chunk_parts.append(parsed_data['content'])
-            else:
-                for k, v in parsed_data.items():
-                    if isinstance(v, str) and v.strip():
-                        chunk_parts.append(f"{k}: {v.strip()}")
-                    elif isinstance(v, (int, float)):
-                        chunk_parts.append(f"{k}: {v}")
-            if chunk_parts:
-                final_context = "。".join(chunk_parts)
-                final_context = re.sub(r'【.*?】', '', final_context)
-                final_context = re.sub(r'[\u3000\xa0]', ' ', final_context)
-                final_context = re.sub(r'\s+', ' ', final_context).strip()
-                return [final_context]
-    except (ValueError, SyntaxError):
-        pass # Not a valid literal, treat as raw text
+    if pure_text: 
+        chunks.append(pure_text)
+    else:
+        print(f"警告：未能在 context 字符串中找到有效结构 (字典、研报或纯文本)。原始字符串（前100字符）：{json_str_context[:100]}...")
+        chunks.append(f"原始格式，解析失败或无有效结构：{json_str_context.strip()[:100]}...")
 
-    # Fallback: Treat as raw text if no structured parsing is successful
-    # Apply general cleaning similar to how Q and A are cleaned
-    cleaned_text = processed_str_context.replace('，', ',')
-    cleaned_text = cleaned_text.replace('：', ':')
-    cleaned_text = cleaned_text.replace('。', ',') # This might be aggressive, depending on desired outcome
-    cleaned_text = re.sub(r'【.*?】', '', cleaned_text) # Remove specific brackets
-    cleaned_text = re.sub(r'[\u3000\xa0]', ' ', cleaned_text) # Replace unicode spaces
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip() # Normalize all whitespace
-
-    if "原始格式" in cleaned_text or not cleaned_text: # Check for default unparsed messages or empty
-        # If the original text is still looking like unparsed JSON structure,
-        # or it's empty after all attempts, mark it as '解析失败'
-        return [f"原始格式，解析失败或无有效结构：{cleaned_text[:50]}..."] # Added a snippet for debug
-    return [cleaned_text] # Return the cleaned raw text as a single chunk
+    return chunks
 
 
 # --- Main Evaluation Script Logic ---
@@ -183,10 +205,37 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
+    # === 配置量化参数 (8-bit 或 4-bit) ===
+    # 根据您的显存情况选择。4-bit 量化节省更多，但可能对精度影响更大。
+    # 推荐先尝试 8-bit 量化 (load_in_8bit=True)
+    # 如果 8-bit 仍不够，再尝试 4-bit 量化 (load_in_4bit=True)
+    # 注意：不能同时设置 load_in_8bit 和 load_in_4bit
+    
+    # 量化配置 (用于 AutoModel，如 Encoder)
+    quantization_config_encoder = BitsAndBytesConfig(
+        load_in_8bit=True, # 尝试 8-bit 量化
+        # 或者 load_in_4bit=True, # 如果 8-bit 不够，尝试 4-bit
+        # bnb_4bit_quant_type="nf4", # 仅当 load_in_4bit=True 时生效
+        # bnb_4bit_compute_dtype=torch.float16 # 仅当 load_in_4bit=True 时生效
+    )
+
+    # 量化配置 (用于 AutoModelForCausalLM，如 Qwen Reranker)
+    quantization_config_reranker = BitsAndBytesConfig(
+        load_in_8bit=True, # 尝试 8-bit 量化
+        # 或者 load_in_4bit=True, # 如果 8-bit 不够，尝试 4-bit
+        # bnb_4bit_quant_type="nf4", 
+        # bnb_4bit_compute_dtype=torch.float16 
+    )
+
+
     # --- Load Encoder Model and Tokenizer ---
-    print(f"Loading encoder model: {args.encoder_model_name}...")
+    print(f"Loading encoder model: {args.encoder_model_name} with quantization...")
     encoder_tokenizer = AutoTokenizer.from_pretrained(args.encoder_model_name)
-    encoder_model = AutoModel.from_pretrained(args.encoder_model_name).to(device)
+    encoder_model = AutoModel.from_pretrained(
+        args.encoder_model_name,
+        quantization_config=quantization_config_encoder, 
+        torch_dtype=torch.float16 
+    ) 
     encoder_model.eval()
 
     encoder_max_length = encoder_tokenizer.model_max_length
@@ -195,9 +244,13 @@ def main():
         encoder_max_length = 512 
 
     # --- Load Reranker Model and Tokenizer (Using AutoModelForCausalLM as per Qwen's example) ---
-    print(f"Loading reranker model: {args.reranker_model_name}...")
+    print(f"Loading reranker model: {args.reranker_model_name} with quantization...")
     reranker_tokenizer = AutoTokenizer.from_pretrained(args.reranker_model_name, padding_side='left') 
-    reranker_model = AutoModelForCausalLM.from_pretrained(args.reranker_model_name).to(device) 
+    reranker_model = AutoModelForCausalLM.from_pretrained(
+        args.reranker_model_name,
+        quantization_config=quantization_config_reranker, 
+        torch_dtype=torch.float16 
+    ) 
     reranker_model.eval()
 
     token_false_id = reranker_tokenizer.convert_tokens_to_ids("no")
@@ -206,22 +259,28 @@ def main():
 
     prefix = "<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be \"yes\" or \"no\".<|im_end|>\n<|im_start|>user\n"
     suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
-    prefix_tokens = reranker_tokenizer.encode(prefix, add_special_tokens=False)
-    suffix_tokens = reranker_tokenizer.encode(suffix, add_special_tokens=False)
+    # 我们不需要单独的 prefix_tokens 和 suffix_tokens 列表了，因为我们会一次性处理字符串
 
     def format_instruction(instruction, query, doc):
         fixed_instruction = 'Given a web search query, retrieve relevant passages that answer the query' 
         output = "<Instruct>: {instruction}\n<Query>: {query}\n<Document>: {doc}".format(instruction=fixed_instruction, query=query, doc=doc)
         return output
 
+    # === 修改后的 process_reranker_inputs 函数 ===
     def process_reranker_inputs(pairs):
+        # 这里的 pairs 是一个列表，每个元素是格式化后的 (instruct, query, doc) 字符串
+        # 例如: ["<Instruct>: ... <Query>: ... <Document>: ...", ...]
+
+        # 将前缀和后缀直接加到每个输入字符串上
+        full_inputs = [prefix + p + suffix for p in pairs]
+
         inputs = reranker_tokenizer(
-            pairs, padding=False, truncation='longest_first',
-            return_attention_mask=False, max_length=reranker_max_length - len(prefix_tokens) - len(suffix_tokens) 
+            full_inputs, 
+            padding='max_length', # 明确指定填充到 max_length
+            truncation=True,      # 启用截断
+            max_length=reranker_max_length, 
+            return_tensors='pt'
         )
-        for i, ele in enumerate(inputs['input_ids']):
-            inputs['input_ids'][i] = prefix_tokens + ele + suffix_tokens
-        inputs = reranker_tokenizer.pad(inputs, padding=True, return_tensors="pt", max_length=reranker_max_length) 
         for key in inputs:
             inputs[key] = inputs[key].to(reranker_model.device)
         return inputs
@@ -238,7 +297,6 @@ def main():
 
 
     # --- Load and Process Corpus (base_raw_data_path) ---
-    # !!! 核心改动在这里：模仿 split_alphafin_data.py 的逻辑来构建语料库 !!!
     print(f"Loading and processing corpus from: {args.base_raw_data_path} (mimicking split_alphafin_data.py logic)...")
     corpus_documents = {}
     
@@ -249,7 +307,6 @@ def main():
     skipped_corpus_items = 0
 
     for idx, item in enumerate(tqdm(raw_data, desc="Building corpus map with aligned IDs")):
-        # Assign doc_id based on original index, consistent with split_alphafin_data.py
         doc_id = str(idx) 
 
         q_raw = item.get('question', '')
@@ -273,21 +330,19 @@ def main():
         if not natural_language_chunks:
             is_parse_failed_chunk = True
         elif len(natural_language_chunks) == 1 and (
-            "原始格式，无有效字典" in natural_language_chunks[0] or 
-            "原始格式，解析失败" in natural_language_chunks[0] or 
-            "原始格式，无有效结构" in natural_language_chunks[0]
+            natural_language_chunks[0].startswith("原始格式，无有效字典") or 
+            natural_language_chunks[0].startswith("原始格式，解析失败") or
+            natural_language_chunks[0].startswith("原始格式，无有效结构")
         ):
             is_parse_failed_chunk = True
             
         c = "\n\n".join(natural_language_chunks) 
         
-        # Only add to corpus if it would have been included in eval.jsonl by split_alphafin_data.py
         if q and a and not is_parse_failed_chunk: 
-            corpus_documents[doc_id] = c # Use the processed context
+            corpus_documents[doc_id] = c 
             processed_corpus_count += 1
         else:
             skipped_corpus_items += 1
-            # print(f"Warning: Skipping corpus item with original ID {doc_id} due to invalid Q/A/context. Q: {q[:50]}, A: {a[:50]}. Context: {original_json_context_str[:100]}...") # Too verbose if many
             
     print(f"Corpus built with {len(corpus_documents)} documents (after filtering).")
     print(f"Skipped {skipped_corpus_items} items from raw data while building corpus.")
@@ -298,10 +353,11 @@ def main():
     corpus_embeddings = []
 
     print("Generating embeddings for corpus documents...")
-    batch_size = 16 
+    batch_size = 8 
     for i in tqdm(range(0, len(corpus_texts), batch_size), desc="Embedding corpus"):
         batch_texts = corpus_texts[i:i + batch_size] 
         with torch.no_grad():
+            # === 修改 Encoder 分词器调用方式 ===
             encoded_input = encoder_tokenizer(
                 batch_texts, 
                 padding='max_length', 
@@ -312,18 +368,22 @@ def main():
             model_output = encoder_model(**encoded_input)
             embeddings = mean_pooling(model_output, encoded_input['attention_mask'])
             embeddings = F.normalize(embeddings, p=2, dim=1) 
-            corpus_embeddings.append(embeddings.cpu())
+            corpus_embeddings.append(embeddings.cpu()) 
     
-    corpus_embeddings = torch.cat(corpus_embeddings, dim=0).to(device)
+    corpus_embeddings = torch.cat(corpus_embeddings, dim=0).to(device) 
     print(f"Generated {corpus_embeddings.shape[0]} corpus embeddings.")
 
     # --- Load Evaluation Data ---
     print(f"Loading evaluation data from: {args.eval_jsonl}...")
     eval_data = []
+    LIMIT_EVAL_DATA = 100 
+    
     with open(args.eval_jsonl, 'r', encoding='utf-8') as f:
-        for line in f:
+        for i, line in enumerate(f):
+            if i >= LIMIT_EVAL_DATA: 
+                break
             eval_data.append(json.loads(line))
-    print(f"Loaded {len(eval_data)} evaluation queries.")
+    print(f"Loaded {len(eval_data)} evaluation queries (limited to {LIMIT_EVAL_DATA} for testing).")
 
     all_retrieval_ranks = []
     all_rerank_ranks = []
@@ -341,15 +401,13 @@ def main():
             skipped_queries_count += 1
             print(f"Warning: Missing 'doc_id' for query: '{query_text[:50]}...'. Skipping.")
             continue
-        # 语料库构建逻辑已与eval.jsonl一致，此处判断应该更少触发
         if ground_truth_doc_id not in corpus_documents:
             skipped_queries_count += 1
-            # 仅在实际发生时打印，避免大量重复警告
-            # print(f"Warning: 'doc_id': '{ground_truth_doc_id}' from eval_jsonl not found in CORPUS_DOCUMENTS. Skipping query: '{query_text[:50]}...'.")
             continue
         
         # --- 1. Retrieval (Encoder) ---
         with torch.no_grad():
+            # === 修改 Encoder 分词器调用方式 ===
             query_encoded = encoder_tokenizer(
                 query_text, 
                 padding='max_length', 
@@ -357,8 +415,9 @@ def main():
                 max_length=encoder_max_length, 
                 return_tensors='pt'
             ).to(device)
-            query_embedding = mean_pooling(encoder_model(**query_encoded), query_encoded['attention_mask'])
-            query_embedding = F.normalize(query_embedding, p=2, dim=1)
+            model_output = encoder_model(**query_encoded)
+            embeddings = mean_pooling(model_output, query_encoded['attention_mask'])
+            query_embedding = F.normalize(embeddings, p=2, dim=1)
 
             similarities = torch.matmul(query_embedding, corpus_embeddings.transpose(0, 1))
             
@@ -384,6 +443,7 @@ def main():
             doc_text = corpus_documents.get(doc_id, "") 
             if doc_text:
                 formatted_text = format_instruction(None, query_text, doc_text)
+                # 这里只将格式化后的字符串添加到列表中，不再预先添加 prefix 和 suffix
                 rerank_data_for_qwen.append((formatted_text, doc_id)) 
 
         if not rerank_data_for_qwen:
@@ -391,12 +451,14 @@ def main():
             continue
         
         reranked_results = []
-        reranker_batch_size = 16 
+        reranker_batch_size = 8 
         for j in range(0, len(rerank_data_for_qwen), reranker_batch_size):
-            current_batch_pairs = [item[0] for item in rerank_data_for_qwen[j:j + reranker_batch_size]]
+            # current_batch_pairs 此时只包含格式化后的 (instruct, query, doc) 字符串
+            current_batch_pairs_content = [item[0] for item in rerank_data_for_qwen[j:j + reranker_batch_size]]
             current_batch_doc_ids = [item[1] for item in rerank_data_for_qwen[j:j + reranker_batch_size]]
 
-            rerank_inputs_batch = process_reranker_inputs(current_batch_pairs)
+            # 直接调用修改后的 process_reranker_inputs
+            rerank_inputs_batch = process_reranker_inputs(current_batch_pairs_content)
             current_batch_scores = compute_reranker_logits(rerank_inputs_batch)
 
             for k, score in enumerate(current_batch_scores):
