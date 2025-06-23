@@ -17,12 +17,31 @@ echo "执行时间: $(date)"
 echo "------------------------------------"
 echo ""
 
+# ---
+# 0. 生成Q-C-A数据文件（确保使用最新优化后的数据）
+echo "--- 0. 生成Q-C-A数据文件 ---"
+python convert_tatqa_to_qca.py
+echo ""
+
 # 1. TatQA英文Encoder评测（GPU）
 echo "--- 1. TatQA 英文Encoder预训练模型评测 ---"
 python run_encoder_eval.py --model_name ProsusAI/finbert --eval_jsonl evaluate_mrr/tatqa_eval.jsonl --max_samples 1000 --print_examples 3
 echo ""
 
-# ---
+# # ---
+# # 2. TatQA英文Encoder微调（每个epoch输出Loss和MRR）
+# echo "--- 2. TatQA 英文Encoder模型微调 ---"
+# python finetune_encoder.py \
+#     --model_name ProsusAI/finbert \
+#     --train_jsonl evaluate_mrr/tatqa_train_qc.jsonl \
+#     --eval_jsonl evaluate_mrr/tatqa_eval.jsonl \
+#     --output_dir models/finetuned_tatqa_en \
+#     --batch_size 32 \
+#     --epochs 5 \
+#     --max_samples 10000 \
+#     --eval_steps 0
+# echo ""
+
 # 2. TatQA英文Encoder微调（每个epoch输出Loss和MRR）
 echo "--- 2. TatQA 英文Encoder模型微调 ---"
 python finetune_encoder.py \
@@ -32,8 +51,8 @@ python finetune_encoder.py \
     --output_dir models/finetuned_tatqa_en \
     --batch_size 32 \
     --epochs 5 \
-    --max_samples 10000 \
-    --eval_steps 0
+    --max_samples 100000 \  # 修改这里
+    --eval_steps 500       # 修改这里
 echo ""
 
 # ---
