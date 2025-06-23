@@ -23,15 +23,17 @@ echo "--- 0. 生成Q-C-A数据文件 ---"
 python convert_tatqa_to_qca.py
 echo ""
 
+# ---
 # 1. TatQA英文Encoder预训练模型评测 (启用 Re-Ranker)
 echo "--- 1. TatQA 英文Encoder预训练模型评测 ---"
+# 以下是调用 run_encoder_eval.py 并启用 Re-Ranker 的命令
 python run_encoder_eval.py \
     --model_name ProsusAI/finbert \
     --eval_jsonl evaluate_mrr/tatqa_eval.jsonl \
     --max_samples 1000 \
     --print_examples 3 \
-    --reranker_model_name cross-encoder/ms-marco-MiniLM-L-6-v2 \ # 添加此行
-    --reranker_top_k 100 # 添加此行
+    --reranker_model_name cross-encoder/ms-marco-MiniLM-L-6-v2 \
+    --reranker_top_k 100
 echo ""
 
 # ---
@@ -57,8 +59,8 @@ python run_encoder_eval.py \
     --eval_jsonl evaluate_mrr/tatqa_eval.jsonl \
     --max_samples 1000 \
     --print_examples 3 \
-    --reranker_model_name cross-encoder/ms-marco-MiniLM-L-6-v2 \ # 添加此行
-    --reranker_top_k 100 # 添加此行
+    --reranker_model_name cross-encoder/ms-marco-MiniLM-L-6-v2 \
+    --reranker_top_k 100
 echo ""
 
 # # ---
