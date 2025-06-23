@@ -298,7 +298,7 @@ def main():
     corpus_embeddings = []
 
     print("Generating embeddings for corpus documents...")
-    batch_size = 32 
+    batch_size = 16 
     for i in tqdm(range(0, len(corpus_texts), batch_size), desc="Embedding corpus"):
         batch_texts = corpus_texts[i:i + batch_size] 
         with torch.no_grad():
