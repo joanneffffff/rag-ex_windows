@@ -7,17 +7,78 @@ import numpy as np
 import os
 import ast
 import re
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig, BitsAndBytesConfig # 导入 BitsAndBytesConfig
 
-# 定义一个简单的 CustomCrossEncoder 类，以便我们可以在compute_mrr_with_reranker中以类似的方式调用predict
+# 定义一个 CustomCrossEncoder 类
 class CustomCrossEncoder:
-    def __init__(self, model_name, device, max_length=512, trust_remote_code=False):
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+    def __init__(self, model_name, max_length=8192, trust_remote_code=False): # 移除 device 参数，因为 device_map="auto" 会处理
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side='left', trust_remote_code=trust_remote_code)
         
-        # 加载模型配置
-        config = AutoConfig.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+        # **核心修改：尝试加载为 8-bit 量化模型，并使用 BitsAndBytesConfig**
+        # 需要确保您的环境安装了 'accelerate' 和 'bitsandbytes' 库：
+        # pip install accelerate bitsandbytes
+        
+        # 推荐的量化配置方式
+        quantization_config = BitsAndBytesConfig(
+            load_in_8bit=True, # 启用 8-bit 量化
+            # 可以根据需要添加其他 bitsandbytes 配置，例如：
+            # bnb_4bit_quant_type="nf4", 
+            # bnb_4bit_compute_dtype=torch.float16,
+            # bnb_4bit_use_double_quant=True,
+        )
 
-        # 确保tokenizer的padding token设置
+        try:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name, 
+                quantization_config=quantization_config, # <-- 将 config 对象传递给 quantization_config
+                device_map="auto", # <-- 自动将模型分配到可用设备（GPU），支持多卡
+                trust_remote_code=trust_remote_code
+            )
+            print("Reranker 模型已尝试加载为 8-bit 量化模型 (使用 BitsAndBytesConfig)。")
+        except Exception as e:
+            # 如果 8-bit 量化加载失败，回退到 FP16 加载
+            print(f"警告: 无法加载 8-bit 量化模型，尝试回退到 FP16。错误: {e}")
+            try:
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_name, 
+                    torch_dtype=torch.float16, # <-- 回退到 FP16 降低显存占用
+                    device_map="auto", # 即使 FP16 也使用自动设备映射
+                    trust_remote_code=trust_remote_code
+                )
+                print("Reranker 模型已回退到 torch.float16 加载 (并使用 device_map='auto')。")
+            except Exception as e_fp16:
+                # 如果 FP16 也失败，最终回退到默认的 FP32
+                print(f"警告: 无法使用 torch.float16 加载模型，回退到默认设置 (FP32)。错误: {e_fp16}")
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    model_name, 
+                    device_map="auto", # 即使 FP32 也使用自动设备映射
+                    trust_remote_code=trust_remote_code
+                )
+                print("Reranker 模型已使用默认设置 (FP32) 加载 (并使用 device_map='auto')。")
+        
+        # 对于 load_in_8bit/4bit 或 device_map="auto"，模型会自动放到GPU
+        # 实际设备取决于 Accelerate 的分配，可能会分布在多个设备上
+        print(f"Reranker 模型加载到设备: {self.model.device} (或分布在多个设备上)")
+        
+        self.model.eval() # 设置为评估模式
+        self.max_length = max_length
+
+        # 获取 'yes' 和 'no' 的 token ID
+        self.token_false_id = self.tokenizer.convert_tokens_to_ids("no")
+        self.token_true_id = self.tokenizer.convert_tokens_to_ids("yes")
+
+        if self.token_false_id is None:
+            raise ValueError("Tokenizer 无法将 'no' 转换为 token ID。请检查模型是否支持此 token。")
+        if self.token_true_id is None:
+            raise ValueError("Tokenizer 无法将 'yes' 转换为 token ID。请检查模型是否支持此 token。")
+        
+        # 定义前缀和后缀，模仿官方代码的指令格式
+        self.prefix = "<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be \"yes\" or \"no\".<|im_end|>\n<|im_start|>user\n"
+        self.suffix = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+        self.prefix_tokens = self.tokenizer.encode(self.prefix, add_special_tokens=False)
+        self.suffix_tokens = self.tokenizer.encode(self.suffix, add_special_tokens=False)
+        
+        # 确保tokenizer的pad_token_id与模型匹配，Qwen tokenizer通常使用eos_token作为pad_token
         if self.tokenizer.pad_token is None:
             if self.tokenizer.eos_token is not None:
                 self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -29,25 +90,44 @@ class CustomCrossEncoder:
                 self.tokenizer.add_special_tokens({'pad_token': '[PAD]'})
                 print(f"警告: 自定义Reranker的tokenizer没有定义pad_token，已添加新的pad_token '[PAD]'。")
         
-        # 将tokenizer的pad_token_id同步到模型config中
-        if self.tokenizer.pad_token_id is not None:
-            config.pad_token_id = self.tokenizer.pad_token_id
+        # 确保模型config的pad_token_id也设置正确，但对于CausalLM，通常加载时会自动处理
+        if self.tokenizer.pad_token_id is not None and self.model.config.pad_token_id is None:
+            self.model.config.pad_token_id = self.tokenizer.pad_token_id
             print(f"将tokenizer的pad_token_id ({self.tokenizer.pad_token_id}) 同步到模型config.pad_token_id。")
-        else:
-            print("警告: 无法获取tokenizer的pad_token_id，模型可能仍会遇到padding问题。")
 
 
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_name, config=config, trust_remote_code=trust_remote_code)
-        self.device = device
-        self.model.to(device)
-        self.model.eval() # 设置为评估模式
-        self.max_length = max_length
+    def format_instruction(self, instruction, query, doc):
+        if instruction is None:
+            instruction = 'Given a web search query, retrieve relevant passages that answer the query'
+        output = "<Instruct>: {instruction}\n<Query>: {query}\n<Document>: {doc}".format(instruction=instruction,query=query, doc=doc)
+        return output
 
-        # 确保tokenizer的padding方向是正确的（通常是右侧填充）
-        if self.tokenizer.padding_side != "right":
-            self.tokenizer.padding_side = "right"
-            print(f"警告: tokenizer的padding_side不是'right'，已将其设置为'right'。")
-
+    def process_inputs(self, pairs):
+        # max_length 需要考虑前缀和后缀的长度
+        effective_max_length = self.max_length - len(self.prefix_tokens) - len(self.suffix_tokens)
+        inputs = self.tokenizer(
+            pairs, 
+            padding=False, # 这里的 False 表示在 tokenize 阶段不填充
+            truncation='longest_first', 
+            return_attention_mask=False, 
+            max_length=effective_max_length
+        )
+        for i, ele in enumerate(inputs['input_ids']):
+            inputs['input_ids'][i] = self.prefix_tokens + ele + self.suffix_tokens
+        
+        # 在这里进行填充，并且明确指定 padding='max_length' 以确保统一长度
+        inputs = self.tokenizer.pad(inputs, padding='max_length', return_tensors="pt", max_length=self.max_length)
+        
+        # 确保输入张量在模型所在的设备上
+        # 对于多卡模式，这里应该确保张量在正确的设备上，device_map="auto" 会处理模型分片
+        # 但输入数据仍需送到正确设备。对于 Accelerate，通常 inputs.to(model.device) 
+        # 会将张量移动到模型的第一块卡，或者 Accelerate 内部会处理
+        for key in inputs:
+            # 如果模型是分片的，input_ids 可能会自动被移动到正确的设备。
+            # 如果不是分片的，或者为了确保，手动移动到模型第一块卡。
+            # 这里我们假设 model.device 会返回模型起始或主要设备
+            inputs[key] = inputs[key].to(self.model.device) 
+        return inputs
 
     @torch.no_grad() # 预测时不需要计算梯度
     def predict(self, sentences, batch_size=32, show_progress_bar=False, convert_to_tensor=True):
@@ -56,33 +136,33 @@ class CustomCrossEncoder:
         if show_progress_bar:
             iterator = tqdm(iterator, desc="Reranker predicting")
 
-        for i in iterator:
-            batch_sentences = sentences[i:i + batch_size]
-            
-            features = self.tokenizer(
-                batch_sentences, 
-                padding=True, 
-                truncation=True, 
-                max_length=self.max_length,
-                return_tensors="pt"
-            ).to(self.device)
+        # 官方代码中使用的 task instruction
+        task_instruction = "Given a web search query, retrieve relevant passages that answer the query"
 
-            outputs = self.model(**features)
+        for i in iterator:
+            batch_sentences_pairs = sentences[i:i + batch_size]
             
-            # 关键修改：从 logits 中提取分数
-            # outputs.logits 的形状通常是 (batch_size, num_labels)
-            # 对于二分类，num_labels通常为2。我们取索引为1的logit作为相关性分数。
+            # 使用官方的 format_instruction 格式化输入对
+            formatted_pairs = [self.format_instruction(task_instruction, q, d) 
+                               for q, d in batch_sentences_pairs]
             
-            # 确保 outputs.logits 至少有一个维度
-            if outputs.logits.dim() > 1 and outputs.logits.shape[1] > 1:
-                # 尝试选择第二个 logit（通常代表正类别，即相关性）
-                scores = outputs.logits[:, 1]
-            else:
-                # 如果只有一个维度，或者只有一个输出标签，直接使用该输出
-                scores = outputs.logits
+            # 使用官方的 process_inputs 处理输入
+            inputs = self.process_inputs(formatted_pairs)
+
+            # 官方的 compute_logits 逻辑
+            # 获取最后一个 token 的 logits。这个 logit 包含了所有词汇的概率分布。
+            batch_logits = self.model(**inputs).logits[:, -1, :] 
             
-            # 确保 scores 是一个一维张量，方便后续处理
-            scores = scores.squeeze()
+            # 提取 'yes' 和 'no' 这两个特定 token 对应的 logits
+            true_vector = batch_logits[:, self.token_true_id] 
+            false_vector = batch_logits[:, self.token_false_id] 
+            
+            # 堆叠 'no' 和 'yes' 的 logits，然后应用 log_softmax 得到对数概率
+            batch_scores = torch.stack([false_vector, true_vector], dim=1)
+            batch_scores = torch.nn.functional.log_softmax(batch_scores, dim=1)
+            
+            # 取 'yes' 的概率 (索引为 1)
+            scores = batch_scores[:, 1].exp() # .exp() 将对数概率转换为概率
 
             if convert_to_tensor:
                 all_scores.append(scores)
@@ -256,6 +336,7 @@ def convert_json_context_to_natural_language_chunks(json_str_context, company_na
 
     return chunks
 
+
 def build_corpus_from_alphafin_contexts(alphafin_qca_file_path):
     all_chunks = []
     seen_contexts = set()
@@ -346,6 +427,7 @@ def compute_mrr_with_reranker(encoder_model, reranker_model, eval_data, corpus_c
         retrieved_chunks_for_rerank = [] 
         for idx in top_retrieved_indices:
             chunk = corpus_chunks[idx]
+            # reranker_input_pairs 应该是一个包含 [query, document] 对的列表
             reranker_input_pairs.append([current_query_text, chunk["text"]])
             retrieved_chunks_for_rerank.append(chunk)
 
@@ -354,8 +436,11 @@ def compute_mrr_with_reranker(encoder_model, reranker_model, eval_data, corpus_c
             continue
 
         # 使用我们自定义的 CustomCrossEncoder 实例进行预测
+        # **显存优化：默认 batch_size 调整为 1**
+        # 因为 reranker LM_head 部分可能在长序列下仍然OOM，batch_size=1 是最保险的
         reranker_scores = reranker_model.predict(
             reranker_input_pairs, 
+            batch_size=8, # <-- 关键修改：默认设置为 1，以最大限度减少 LM_head 的显存占用
             show_progress_bar=False, 
             convert_to_tensor=True,
         )
@@ -363,6 +448,7 @@ def compute_mrr_with_reranker(encoder_model, reranker_model, eval_data, corpus_c
 
         scored_retrieved_chunks_with_scores = []
         for j, score in enumerate(reranker_scores):
+            # score 现在应该已经是标量值了
             scored_retrieved_chunks_with_scores.append({"chunk_text": retrieved_chunks_for_rerank[j]["text"], "score": score.item()})
 
         scored_retrieved_chunks_with_scores.sort(key=lambda x: x["score"], reverse=True)
@@ -384,20 +470,25 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--encoder_model_name", type=str, required=True, help="Path to the fine-tuned Encoder model.")
-    parser.add_argument("--reranker_model_name", type=str, default="cross-encoder/ms-marco-MiniLM-L-12-v2", help="Path to the Reranker model or Hugging Face ID.")
+    parser.add_argument("--reranker_model_name", type=str, default="Qwen/Qwen3-Reranker-0.6B", help="Path to the Reranker model or Hugging Face ID.") # 更改默认值
     parser.add_argument("--eval_jsonl", type=str, required=True, help="Path to the evaluation JSONL file.")
     parser.add_argument("--base_raw_data_path", type=str, default="data/alphafin/alphafin_rag_ready_generated_cleaned.json", help="Path to the JSON file containing all contexts for Chinese corpus building.")
     parser.add_argument("--top_k_retrieval", type=int, default=100, help="Number of top documents to retrieve from Encoder before reranking.")
     parser.add_argument("--top_k_rerank", type=int, default=10, help="Number of top documents to consider after reranking for MRR calculation.")
     args = parser.parse_args()
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"使用设备: {device}")
+    # 在 main 函数中不再需要直接指定 device，因为 device_map="auto" 和 accelerate launch 会接管
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    # print(f"使用设备: {device}") # 这一行可以暂时保留，但实际设备由 accelerate 决定
 
     print(f"加载 Encoder 模型: {args.encoder_model_name}")
     try:
+        # Encoder 模型通常使用单卡加载，或者 SentenceTransformer 内部有自己的 device 处理
+        # 默认仍将其放在主设备上
         encoder_model = SentenceTransformer(args.encoder_model_name) 
-        encoder_model.to(device)
+        # 确保 encoder_model 也在 GPU 上
+        if torch.cuda.is_available():
+            encoder_model.to("cuda")
         print("Encoder 模型加载成功。")
     except Exception as e:
         print(f"加载 Encoder 模型失败。错误信息: {e}")
@@ -407,12 +498,11 @@ def main():
 
     print(f"加载 Reranker 模型: {args.reranker_model_name}")
     try:
-        # 使用我们自定义的 CustomCrossEncoder 类
+        # CustomCrossEncoder 现在不再需要传入 device 参数
         reranker_model = CustomCrossEncoder(
             args.reranker_model_name, 
-            device=device,
-            max_length=512, # 建议值，可以根据你的数据和模型最大输入长度调整
-            trust_remote_code=True # 对于某些模型如Qwen系列、自定义模型可能需要
+            max_length=8192, # Qwen3-Reranker 模型的推荐 max_length，如果有必要可以再调小
+            trust_remote_code=True 
         )
         print("Reranker 模型加载成功。")
 
