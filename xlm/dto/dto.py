@@ -8,6 +8,7 @@ class DocumentMetadata(BaseModel):
     source: str = ""
     created_at: str = ""
     author: str = ""
+    language: str = ""
 
 
 class DocumentWithMetadata(BaseModel):

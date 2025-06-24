@@ -2,7 +2,7 @@ import os
 import sys
 import warnings
 from pathlib import Path
-from config.parameters import config
+from config.parameters import config, Config
 
 # 初始化NLTK数据
 print("正在检查NLTK数据...")
@@ -69,7 +69,7 @@ if __name__ == "__main__":
         generator_model_name = config.generator.model_name
         data_path = config.data.data_path if hasattr(config.data, 'data_path') else "data/rise_of_ai.txt"
         prompt_template = "Context: {context}\nQuestion: {question}\n\nAnswer:"
-        cache_dir = config.generator.cache_dir
+        cache_dir = Config().cache_dir
         
         print("正在启动 RAG-Ex 系统...")
         print(f"- 使用编码器: {encoder_model_name}")

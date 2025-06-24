@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-启动Gradio RAG UI系统（唯一入口）
+启动Gradio RAG UI系统
 """
 
 import sys
@@ -23,40 +23,33 @@ def main():
             subprocess.check_call([sys.executable, "-m", "pip", "install", "gradio"])
             print("✅ Gradio安装完成")
         
-        print("Step 1. Starting Gradio RAG UI system...")
-        print("Access URL: http://localhost:7860")
-        print("Press Ctrl+C to stop server")
-        
-        # 使用config中的平台感知配置
-        config = Config()
+        print("🚀 启动Gradio RAG UI系统...")
+        print("🌐 访问地址: http://localhost:7860")
+        print("按 Ctrl+C 停止服务器")
         
         # 导入并启动UI
         from xlm.ui.optimized_rag_ui import OptimizedRagUI
         
         # 创建UI实例
+        cache_dir = Config().cache_dir
         ui = OptimizedRagUI(
-            cache_dir=config.cache_dir,
+            encoder_model_name="paraphrase-multilingual-MiniLM-L12-v2",
+            generator_model_name="Qwen/Qwen2-1.5B-Instruct",  # 使用Qwen2-1.5B
+            cache_dir=cache_dir,
+            data_path="evaluate_mrr/alphafin_train_qc.jsonl",  # 使用QCA格式数据
             use_faiss=True,
-            enable_reranker=True,
-            window_title="Financial Explainable RAG System",
-            title="Financial Explainable RAG System",
-            examples=[
-            ["什么是股票投资？"],
-            ["请解释债券的基本概念"],
-            ["基金投资与股票投资有什么区别？"],
-            ["What is stock investment?"],
-            ["Explain the basic concepts of bonds"],
-            ["What are the differences between fund investment and stock investment?"]
-            ]
+            enable_reranker=True,  # 启用reranker (将使用Qwen3-0.6B)
+            window_title="Enhanced RAG Financial System",
+            title="Enhanced RAG Financial System"
         )
         
         # 启动UI
         ui.launch(share=False)
         
     except KeyboardInterrupt:
-        print("\nServer stopped")
+        print("\n👋 服务器已停止")
     except Exception as e:
-        print(f"Startup failed: {e}")
+        print(f"❌ 启动失败: {e}")
         import traceback
         traceback.print_exc()
 

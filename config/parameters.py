@@ -9,12 +9,11 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 
 # --- Platform-Aware Path Configuration ---
-# Set the default Hugging Face cache directory based on the operating system.
-# You can modify the Windows path here if needed (e.g., "D:/AI/huggingface").
-WINDOWS_CACHE_DIR = "M:/huggingface"
-LINUX_CACHE_DIR = "/users/sgjfei3/data/huggingface"
-
-DEFAULT_CACHE_DIR = WINDOWS_CACHE_DIR if platform.system() == "Windows" else LINUX_CACHE_DIR
+# Set the embedding cache directory to models/embedding_cache
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+EMBEDDING_CACHE_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, "../models/embedding_cache"))
+RERANKER_CACHE_DIR = os.path.abspath(os.path.join(PROJECT_ROOT, "../models/hf_cache"))
+DEFAULT_CACHE_DIR = EMBEDDING_CACHE_DIR
 
 @dataclass
 class EncoderConfig:
@@ -24,7 +23,7 @@ class EncoderConfig:
     chinese_model_path: str = "models/finetuned_alphafin_zh"
     # 英文微调模型路径
     english_model_path: str = "models/finetuned_finbert_tatqa"
-    cache_dir: str = DEFAULT_CACHE_DIR
+    cache_dir: str = EMBEDDING_CACHE_DIR
     device: Optional[str] = None  # Will auto-detect if None
     batch_size: int = 32
     max_length: int = 512
@@ -32,7 +31,7 @@ class EncoderConfig:
 @dataclass
 class RerankerConfig:
     model_name: str = "Qwen/Qwen3-Reranker-0.6B"
-    cache_dir: str = DEFAULT_CACHE_DIR
+    cache_dir: str = RERANKER_CACHE_DIR
     device: Optional[str] = None  # Will auto-detect if None
     use_quantization: bool = True
     quantization_type: str = "8bit"  # "8bit" or "4bit"
@@ -49,11 +48,17 @@ class RetrieverConfig:
     # 重排序相关配置
     retrieval_top_k: int = 100  # FAISS检索的top-k
     rerank_top_k: int = 10      # 重排序后的top-k
+    # 新增参数
+    use_existing_embedding_index: bool = True  # 是否使用现有embedding索引
+    max_alphafin_chunks: int = 5000  # 限制AlphaFin数据chunk数量
 
 @dataclass
 class DataConfig:
     data_dir: str = "data"  # Unified root data directory
     max_samples: int = 500 # Max samples to load from each dataset
+    # 新增参数
+    use_existing_embedding_index: bool = False  # 是否使用现有embedding索引
+    max_alphafin_chunks: int = 10000  # 限制AlphaFin数据chunk数量
 
 @dataclass
 class ModalityConfig:
@@ -71,12 +76,11 @@ class SystemConfig:
 @dataclass
 class GeneratorConfig:
     model_name: str = "Qwen/Qwen2-1.5B-Instruct"
-    # model_name: str = "Qwen/Qwen3-8B"
-    cache_dir: str = DEFAULT_CACHE_DIR
+    cache_dir: str = RERANKER_CACHE_DIR
 
 @dataclass
 class Config:
-    cache_dir: str = DEFAULT_CACHE_DIR # Global cache directory
+    cache_dir: str = EMBEDDING_CACHE_DIR # Global cache directory
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
@@ -90,9 +94,9 @@ class Config:
         if hasattr(self.encoder, 'cache_dir'):
             self.encoder.cache_dir = self.cache_dir
         if hasattr(self.reranker, 'cache_dir'):
-            self.reranker.cache_dir = self.cache_dir
+            self.reranker.cache_dir = RERANKER_CACHE_DIR
         if hasattr(self.generator, 'cache_dir'):
-            self.generator.cache_dir = self.cache_dir # Bug fix: Correctly assign global cache_dir
+            self.generator.cache_dir = RERANKER_CACHE_DIR
 
     @classmethod
     def load_environment_config(cls) -> 'Config':

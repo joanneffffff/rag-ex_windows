@@ -15,8 +15,8 @@ class SBERTRetriever(Retriever):
         encoder: Encoder,
         max_context_length: int = 100,
         num_threads: int = 4,
-        corpus_embeddings: List[List[float]] = None,
-        corpus_documents: List[DocumentWithMetadata] = None,
+        corpus_embeddings: list = None,
+        corpus_documents: list = None,
         use_faiss: bool = False,
         batch_size: int = 32,
         use_gpu: bool = False
@@ -28,7 +28,7 @@ class SBERTRetriever(Retriever):
         self.use_faiss = use_faiss
         self.batch_size = batch_size
         self.use_gpu = use_gpu
-        self.corpus_embeddings = []  # Initialize empty list
+        self.corpus_embeddings = np.array([])
         
         # Initialize FAISS if needed
         self.index = None
@@ -38,12 +38,12 @@ class SBERTRetriever(Retriever):
         # Process initial corpus if provided
         if corpus_documents:
             if corpus_embeddings is not None:
-                self.corpus_embeddings = corpus_embeddings
+                self.corpus_embeddings = np.array(corpus_embeddings)
             else:
                 self.corpus_embeddings = self._batch_encode_corpus(documents=corpus_documents)
             
             # Add embeddings to FAISS if using it
-            if self.use_faiss and self.corpus_embeddings:
+            if self.use_faiss and self.corpus_embeddings is not None and hasattr(self.corpus_embeddings, 'shape') and self.corpus_embeddings.shape[0] > 0:
                 self._add_to_faiss(self.corpus_embeddings)
     
     def _init_faiss(self):
@@ -75,8 +75,8 @@ class SBERTRetriever(Retriever):
                 self.index = faiss.IndexIVFFlat(quantizer, dimension, nlist)
                 
                 # Train index if needed
-                if not self.index.is_trained and self.corpus_embeddings:
-                    train_data = np.array(self.corpus_embeddings).astype('float32')
+                if not self.index.is_trained and self.corpus_embeddings is not None and self.corpus_embeddings.shape[0] > 0:
+                    train_data = self.corpus_embeddings.astype('float32')
                     self.index.train(train_data)
     
     def _batch_encode_corpus(self, documents: List[DocumentWithMetadata]) -> np.ndarray:
@@ -86,9 +86,9 @@ class SBERTRetriever(Retriever):
         for i in range(0, len(documents), batch_size):
             batch = documents[i:i + batch_size]
             batch_texts = [doc.content for doc in batch]
-            # 调用 encode_batch 而不是 encode
-            batch_embeddings = self.encoder.encode_batch(texts=batch_texts)
-            all_embeddings.extend(batch_embeddings['text'])
+            # 使用encode方法而不是encode_batch
+            batch_embeddings = self.encoder.encode(texts=batch_texts)
+            all_embeddings.extend(batch_embeddings)
         return np.array(all_embeddings)
     
     def _add_to_faiss(self, embeddings: List[List[float]]):
@@ -120,11 +120,11 @@ class SBERTRetriever(Retriever):
         else:
             raise AttributeError("Encoder does not support encode or encode_batch methods.")
 
-    def update_corpus(self, documents: List[DocumentWithMetadata], embeddings: List[List[float]] = None):
+    def update_corpus(self, documents: list, embeddings: list = None):
         """Update corpus documents and embeddings"""
         self.corpus_documents = documents
         if embeddings is not None:
-            self.corpus_embeddings = embeddings
+            self.corpus_embeddings = np.array(embeddings)
         else:
             self.corpus_embeddings = self._batch_encode_corpus(documents)
             
@@ -186,11 +186,11 @@ class SBERTRetriever(Retriever):
         self,
         text: str,
         top_k: int = 5,
-    ) -> List[Dict]:
+    ) -> list:
         query_embeddings = self.encode_queries(text=text)
         
         # Ensure we have corpus embeddings
-        if self.corpus_embeddings is None or self.corpus_embeddings.shape[0] == 0:
+        if self.corpus_embeddings is None or not hasattr(self.corpus_embeddings, 'shape') or self.corpus_embeddings.shape[0] == 0:
             return [], []
         
         results = self.search(

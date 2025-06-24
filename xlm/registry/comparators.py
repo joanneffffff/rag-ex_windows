@@ -6,6 +6,7 @@ from xlm.modules.comparator.generic_comparator import (
 from xlm.modules.comparator.n_gram_overlap_comparator import NGramOverlapComparator
 from xlm.modules.comparator.score_comaprator import ScoreComparator
 from xlm.components.encoder.encoder import Encoder
+from config.parameters import Config
 
 # 初始化基本比较器
 levenshtein_comparator = LevenshteinComparator()
@@ -19,7 +20,7 @@ sentence_transformers_based_comparator = EmbeddingComparator(
         # model_name="all-MiniLM-L6-v2",
         model_name="paraphrase-multilingual-MiniLM-L12-v2",
         # cache_dir="D:/AI/huggingface",
-        cache_dir="M:/huggingface"
+        cache_dir=Config().cache_dir
     )
 )
 
@@ -47,7 +48,7 @@ def load_comparator(comparator_name: str, model_name: str = None):
             encoder=Encoder(
                 model_name=model_name,
                 # cache_dir="D:/AI/huggingface",
-                cache_dir="M:/huggingface"
+                cache_dir=Config().cache_dir
             )
         )
     

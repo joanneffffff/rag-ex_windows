@@ -76,11 +76,16 @@ class QwenReranker:
             **model_kwargs
         )
         
-        # 移动到设备
-        if self.device == "cuda":
-            self.model = self.model.cuda()
+        # 移动到设备 - 量化模型不需要手动移动
+        if quantization_config:
+            # 量化模型已经自动设置到正确设备，不需要手动移动
+            print("量化模型已自动设置到设备，跳过手动移动")
         else:
-            self.model = self.model.to(self.device)
+            # 非量化模型需要手动移动到设备
+            if self.device == "cuda":
+                self.model = self.model.cuda()
+            else:
+                self.model = self.model.to(self.device)
         
         self.model.eval()
         

@@ -5,24 +5,34 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from xlm.components.generator.generator import Generator
+from config.parameters import Config
 
 
 class LocalLLMGenerator(Generator):
     def __init__(
         self,
-        model_name: str = "facebook/opt-125m",
-        device: str = "cpu",
-        temperature: float = 0.7,
-        max_new_tokens: int = 100,
-        top_p: float = 0.9,
-        cache_dir: str = "M:/huggingface"
+        model_name: str = "Qwen/Qwen2-1.5B-Instruct",
+        cache_dir: str = None,
+        device: str = None,
+        use_quantization: bool = True,
+        quantization_type: str = "8bit",
+        use_flash_attention: bool = False
     ):
         super().__init__(model_name=model_name)
         self.device = device
-        self.temperature = temperature
-        self.max_new_tokens = max_new_tokens
-        self.top_p = top_p
-        self.cache_dir = cache_dir
+        self.temperature = 0.7
+        self.max_new_tokens = 100
+        self.top_p = 0.9
+        
+        # 使用config中的平台感知配置
+        if cache_dir is None:
+            config = Config()
+            cache_dir = config.cache_dir
+        
+        self.cache_dir = cache_dir  # 关键修正，确保属性存在
+        self.use_quantization = use_quantization
+        self.quantization_type = quantization_type
+        self.use_flash_attention = use_flash_attention
         
         # 创建缓存目录
         os.makedirs(self.cache_dir, exist_ok=True)

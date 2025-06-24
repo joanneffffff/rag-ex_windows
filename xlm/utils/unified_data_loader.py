@@ -13,6 +13,7 @@ import faiss
 from datasets import load_dataset
 from xlm.dto.dto import DocumentWithMetadata
 import pandas as pd
+from config.parameters import Config
 
 class UnifiedDataLoader:
     def __init__(
@@ -22,7 +23,9 @@ class UnifiedDataLoader:
         cache_dir: Optional[str] = None,
     ):
         self.data_dir = Path(data_dir)
-        self.cache_dir = Path(cache_dir) if cache_dir else Path("M:/huggingface")
+        if cache_dir is None:
+            cache_dir = Config().cache_dir
+        self.cache_dir = Path(cache_dir)
         self.max_samples = max_samples
         
         self.logger = logging.getLogger(__name__)

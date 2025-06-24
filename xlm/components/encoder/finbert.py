@@ -4,15 +4,28 @@ from torch import nn
 from transformers import AutoModel, AutoTokenizer
 import numpy as np
 from tqdm import tqdm
+from config.parameters import Config
 
 class FinbertEncoder(nn.Module):
     def __init__(
         self,
         model_name: str,
-        cache_dir: str = "M:/huggingface"
+        cache_dir: str = None,
+        device: str = None,
+        batch_size: int = 32,
+        max_length: int = 512
     ):
+        # 使用config中的平台感知配置
+        if cache_dir is None:
+            config = Config()
+            cache_dir = config.cache_dir
+            
         super().__init__()
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.model_name = model_name
+        self.device = device if device else 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.batch_size = batch_size
+        self.max_length = max_length
+        self.cache_dir = cache_dir
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
             cache_dir=cache_dir

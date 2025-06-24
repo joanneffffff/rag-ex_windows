@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from config.parameters import Config
-from xlm.registry.retriever import load_enhanced_retriever
+from xlm.components.retriever.enhanced_retriever import EnhancedRetriever
 from xlm.dto.dto import DocumentWithMetadata, DocumentMetadata
 
 def create_test_documents():
@@ -17,21 +17,17 @@ def create_test_documents():
         DocumentWithMetadata(
             content="安井食品是一家专注于速冻食品生产的企业，主要产品包括火锅料制品、面米制品和菜肴制品。",
             metadata=DocumentMetadata(
-                doc_id="test_zh_1",
-                source="test",
-                language="chinese",
-                question="安井食品主要生产什么产品？",
-                answer="火锅料制品、面米制品和菜肴制品"
+                source="test_chinese",
+                created_at="2024-01-01",
+                author="test"
             )
         ),
         DocumentWithMetadata(
             content="2020年安井食品实现营业收入52.66亿元，同比增长23.66%。",
             metadata=DocumentMetadata(
-                doc_id="test_zh_2",
-                source="test",
-                language="chinese",
-                question="安井食品2020年营业收入是多少？",
-                answer="52.66亿元"
+                source="test_chinese",
+                created_at="2024-01-01",
+                author="test"
             )
         )
     ]
@@ -40,21 +36,17 @@ def create_test_documents():
         DocumentWithMetadata(
             content="Apple Inc. is an American multinational technology company that specializes in consumer electronics, computer software, and online services.",
             metadata=DocumentMetadata(
-                doc_id="test_en_1",
-                source="test",
-                language="english",
-                question="What does Apple Inc. specialize in?",
-                answer="consumer electronics, computer software, and online services"
+                source="test_english",
+                created_at="2024-01-01",
+                author="test"
             )
         ),
         DocumentWithMetadata(
             content="In 2023, Apple reported total revenue of $394.33 billion, with iPhone sales accounting for 52% of total revenue.",
             metadata=DocumentMetadata(
-                doc_id="test_en_2",
-                source="test",
-                language="english",
-                question="What was Apple's total revenue in 2023?",
-                answer="$394.33 billion"
+                source="test_english",
+                created_at="2024-01-01",
+                author="test"
             )
         )
     ]
@@ -86,30 +78,52 @@ def test_dual_space_retriever():
     # 测试中文查询
     print("\n2. 测试中文查询...")
     chinese_query = "安井食品主要生产什么产品？"
-    chinese_results, chinese_scores = retriever.retrieve(
+    chinese_result = retriever.retrieve(
         text=chinese_query,
         top_k=2,
         return_scores=True
     )
     
+    # 处理返回结果
+    if isinstance(chinese_result, tuple):
+        chinese_results, chinese_scores = chinese_result
+    else:
+        chinese_results = chinese_result
+        chinese_scores = []
+    
     print(f"中文查询: {chinese_query}")
-    print(f"检索到 {len(chinese_results)} 个文档:")
-    for i, (doc, score) in enumerate(zip(chinese_results, chinese_scores)):
-        print(f"  {i+1}. 分数: {score:.4f}, 内容: {doc.content[:50]}...")
+    print(f"检索到 {len(chinese_results) if isinstance(chinese_results, list) else 1} 个文档:")
+    
+    if isinstance(chinese_results, list):
+        for i, (doc, score) in enumerate(zip(chinese_results, chinese_scores)):
+            print(f"  {i+1}. 分数: {score:.4f}, 内容: {doc.content[:50]}...")
+    elif chinese_results:
+        print(f"  1. 内容: {chinese_results.content[:50]}...")
     
     # 测试英文查询
     print("\n3. 测试英文查询...")
     english_query = "What does Apple Inc. specialize in?"
-    english_results, english_scores = retriever.retrieve(
+    english_result = retriever.retrieve(
         text=english_query,
         top_k=2,
         return_scores=True
     )
     
+    # 处理返回结果
+    if isinstance(english_result, tuple):
+        english_results, english_scores = english_result
+    else:
+        english_results = english_result
+        english_scores = []
+    
     print(f"英文查询: {english_query}")
-    print(f"检索到 {len(english_results)} 个文档:")
-    for i, (doc, score) in enumerate(zip(english_results, english_scores)):
-        print(f"  {i+1}. 分数: {score:.4f}, 内容: {doc.content[:50]}...")
+    print(f"检索到 {len(english_results) if isinstance(english_results, list) else 1} 个文档:")
+    
+    if isinstance(english_results, list):
+        for i, (doc, score) in enumerate(zip(english_results, english_scores)):
+            print(f"  {i+1}. 分数: {score:.4f}, 内容: {doc.content[:50]}...")
+    elif english_results:
+        print(f"  1. 内容: {english_results.content[:50]}...")
     
     # 测试语料库大小
     print("\n4. 语料库信息...")
@@ -120,7 +134,4 @@ def test_dual_space_retriever():
     print("\n=== 测试完成 ===")
 
 if __name__ == "__main__":
-    # 导入EnhancedRetriever
-    from xlm.components.retriever.enhanced_retriever import EnhancedRetriever
-    
     test_dual_space_retriever() 

@@ -2,6 +2,9 @@ from typing import List, Dict, Tuple, Union
 import numpy as np
 import torch
 import faiss
+import os
+import pickle
+import hashlib
 from sentence_transformers.util import semantic_search
 from langdetect import detect
 from tqdm import tqdm
@@ -21,7 +24,8 @@ class BilingualRetriever(Retriever):
         corpus_documents_ch: List[DocumentWithMetadata] = None,
         use_faiss: bool = False,
         batch_size: int = 32,
-        use_gpu: bool = False
+        use_gpu: bool = False,
+        cache_dir: str = "cache"
     ):
         self.encoder_en = encoder_en
         self.encoder_ch = encoder_ch
@@ -30,6 +34,7 @@ class BilingualRetriever(Retriever):
         self.use_faiss = use_faiss
         self.batch_size = batch_size
         self.use_gpu = use_gpu
+        self.cache_dir = cache_dir
 
         self.corpus_documents_en = corpus_documents_en or []
         self.corpus_embeddings_en = None
@@ -39,7 +44,120 @@ class BilingualRetriever(Retriever):
         self.corpus_embeddings_ch = None
         self.index_ch = None
 
-        if use_faiss:
+        # 创建缓存目录
+        os.makedirs(self.cache_dir, exist_ok=True)
+
+        # 尝试加载缓存的嵌入向量
+        if self._load_cached_embeddings():
+            print("Loaded cached embeddings successfully.")
+        else:
+            print("No valid cache found, computing embeddings...")
+            self._compute_embeddings()
+
+    def _get_cache_key(self, documents: List[DocumentWithMetadata], encoder_name: str) -> str:
+        """生成缓存键，基于文档内容和编码器名称"""
+        # 创建文档内容的哈希
+        content_hash = hashlib.md5()
+        for doc in documents:
+            content_hash.update(doc.content.encode('utf-8'))
+        
+        # 只使用编码器名称的最后部分，避免路径问题
+        encoder_basename = os.path.basename(encoder_name)
+        
+        # 结合编码器名称和文档数量
+        cache_key = f"{encoder_basename}_{len(documents)}_{content_hash.hexdigest()[:16]}"
+        return cache_key
+
+    def _get_cache_path(self, cache_key: str, suffix: str) -> str:
+        """获取缓存文件路径"""
+        return os.path.join(self.cache_dir, f"{cache_key}.{suffix}")
+
+    def _load_cached_embeddings(self) -> bool:
+        """尝试加载缓存的嵌入向量"""
+        try:
+            # 检查英文文档缓存
+            if self.corpus_documents_en:
+                cache_key_en = self._get_cache_key(self.corpus_documents_en, str(self.encoder_en.model_name))
+                embeddings_path_en = self._get_cache_path(cache_key_en, "npy")
+                index_path_en = self._get_cache_path(cache_key_en, "faiss")
+                
+                if os.path.exists(embeddings_path_en):
+                    print(f"Loading cached English embeddings from {embeddings_path_en}")
+                    self.corpus_embeddings_en = np.load(embeddings_path_en)
+                    
+                    if self.use_faiss and os.path.exists(index_path_en):
+                        print(f"Loading cached English FAISS index from {index_path_en}")
+                        self.index_en = faiss.read_index(index_path_en)
+                    elif self.use_faiss:
+                        print("Initializing FAISS index for English documents...")
+                        self.index_en = self._init_faiss(self.encoder_en, len(self.corpus_documents_en))
+                        if self.corpus_embeddings_en is not None:
+                            self._add_to_faiss(self.index_en, self.corpus_embeddings_en)
+                else:
+                    return False
+
+            # 检查中文文档缓存
+            if self.corpus_documents_ch:
+                cache_key_ch = self._get_cache_key(self.corpus_documents_ch, str(self.encoder_ch.model_name))
+                embeddings_path_ch = self._get_cache_path(cache_key_ch, "npy")
+                index_path_ch = self._get_cache_path(cache_key_ch, "faiss")
+                
+                if os.path.exists(embeddings_path_ch):
+                    print(f"Loading cached Chinese embeddings from {embeddings_path_ch}")
+                    self.corpus_embeddings_ch = np.load(embeddings_path_ch)
+                    
+                    if self.use_faiss and os.path.exists(index_path_ch):
+                        print(f"Loading cached Chinese FAISS index from {index_path_ch}")
+                        self.index_ch = faiss.read_index(index_path_ch)
+                    elif self.use_faiss:
+                        print("Initializing FAISS index for Chinese documents...")
+                        self.index_ch = self._init_faiss(self.encoder_ch, len(self.corpus_documents_ch))
+                        if self.corpus_embeddings_ch is not None:
+                            self._add_to_faiss(self.index_ch, self.corpus_embeddings_ch)
+                else:
+                    return False
+
+            return True
+        except Exception as e:
+            print(f"Error loading cached embeddings: {e}")
+            return False
+
+    def _save_cached_embeddings(self):
+        """保存嵌入向量到缓存"""
+        try:
+            # 保存英文文档嵌入向量
+            if self.corpus_documents_en and self.corpus_embeddings_en is not None:
+                cache_key_en = self._get_cache_key(self.corpus_documents_en, str(self.encoder_en.model_name))
+                embeddings_path_en = self._get_cache_path(cache_key_en, "npy")
+                index_path_en = self._get_cache_path(cache_key_en, "faiss")
+                # 确保目录存在
+                os.makedirs(os.path.dirname(embeddings_path_en), exist_ok=True)
+                os.makedirs(os.path.dirname(index_path_en), exist_ok=True)
+                print(f"Saving English embeddings to {embeddings_path_en}")
+                np.save(embeddings_path_en, self.corpus_embeddings_en)
+                if self.use_faiss and self.index_en:
+                    print(f"Saving English FAISS index to {index_path_en}")
+                    faiss.write_index(self.index_en, index_path_en)
+
+            # 保存中文文档嵌入向量
+            if self.corpus_documents_ch and self.corpus_embeddings_ch is not None:
+                cache_key_ch = self._get_cache_key(self.corpus_documents_ch, str(self.encoder_ch.model_name))
+                embeddings_path_ch = self._get_cache_path(cache_key_ch, "npy")
+                index_path_ch = self._get_cache_path(cache_key_ch, "faiss")
+                # 确保目录存在
+                os.makedirs(os.path.dirname(embeddings_path_ch), exist_ok=True)
+                os.makedirs(os.path.dirname(index_path_ch), exist_ok=True)
+                print(f"Saving Chinese embeddings to {embeddings_path_ch}")
+                np.save(embeddings_path_ch, self.corpus_embeddings_ch)
+                if self.use_faiss and self.index_ch:
+                    print(f"Saving Chinese FAISS index to {index_path_ch}")
+                    faiss.write_index(self.index_ch, index_path_ch)
+        except Exception as e:
+            print(f"Error saving cached embeddings: {e}")
+
+    def _compute_embeddings(self):
+        """计算嵌入向量"""
+        if self.use_faiss:
             if self.corpus_documents_en:
                 print("Initializing FAISS index for English documents...")
                 self.index_en = self._init_faiss(self.encoder_en, len(self.corpus_documents_en))
@@ -48,20 +166,23 @@ class BilingualRetriever(Retriever):
                 self.index_ch = self._init_faiss(self.encoder_ch, len(self.corpus_documents_ch))
 
         if self.corpus_documents_en:
-            print(f"Start encoding {len(self.corpus_documents_en)} English documents...")
+            print(f"Start encoding {len(self.corpus_documents_en)} English chunks...")
             self.corpus_embeddings_en = self._batch_encode_corpus(self.corpus_documents_en, self.encoder_en)
             if self.use_faiss and self.corpus_embeddings_en is not None:
-                print("Adding English document embeddings to FAISS index...")
+                print("Adding English chunk embeddings to FAISS index...")
                 self._add_to_faiss(self.index_en, self.corpus_embeddings_en)
-                print("English documents indexed.")
+                print("English chunks indexed.")
 
         if self.corpus_documents_ch:
-            print(f"Start encoding {len(self.corpus_documents_ch)} Chinese documents...")
+            print(f"Start encoding {len(self.corpus_documents_ch)} Chinese chunks...")
             self.corpus_embeddings_ch = self._batch_encode_corpus(self.corpus_documents_ch, self.encoder_ch)
             if self.use_faiss and self.corpus_embeddings_ch is not None:
-                print("Adding Chinese document embeddings to FAISS index...")
+                print("Adding Chinese chunk embeddings to FAISS index...")
                 self._add_to_faiss(self.index_ch, self.corpus_embeddings_ch)
-                print("Chinese documents indexed.")
+                print("Chinese chunks indexed.")
+        
+        # 保存到缓存
+        self._save_cached_embeddings()
         
         print("Retriever initialization complete.")
 

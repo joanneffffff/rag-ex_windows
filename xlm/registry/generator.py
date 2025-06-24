@@ -31,9 +31,9 @@ def load_generator(
             model_name=generator_model_name,
             device='cuda' if use_gpu else 'cpu',
             cache_dir=cache_dir or config.generator.cache_dir,
-            temperature=0.1,  # 降低温度以获得更确定性的答案
-            max_new_tokens=150,  # Increase token limit for more complete answers
-            top_p=0.9
+            use_quantization=True,
+            quantization_type="8bit",
+            use_flash_attention=False
         )
     else:
         return LLMGenerator(
