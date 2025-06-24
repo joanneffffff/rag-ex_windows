@@ -353,7 +353,7 @@ def main():
     corpus_embeddings = []
 
     print("Generating embeddings for corpus documents...")
-    batch_size = 8 
+    batch_size = 4
     for i in tqdm(range(0, len(corpus_texts), batch_size), desc="Embedding corpus"):
         batch_texts = corpus_texts[i:i + batch_size] 
         with torch.no_grad():
@@ -451,7 +451,7 @@ def main():
             continue
         
         reranked_results = []
-        reranker_batch_size = 8 
+        reranker_batch_size = 4 
         for j in range(0, len(rerank_data_for_qwen), reranker_batch_size):
             # current_batch_pairs 此时只包含格式化后的 (instruct, query, doc) 字符串
             current_batch_pairs_content = [item[0] for item in rerank_data_for_qwen[j:j + reranker_batch_size]]

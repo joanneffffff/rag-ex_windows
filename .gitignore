@@ -4,6 +4,8 @@ data/*
 data/tatqa*
 data/alphafin*
 data/processed*
+checkpoints/*
+checkpoints/
 
 # Python cache
 __pycache__/
