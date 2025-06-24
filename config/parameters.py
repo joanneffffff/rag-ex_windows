@@ -18,12 +18,26 @@ DEFAULT_CACHE_DIR = WINDOWS_CACHE_DIR if platform.system() == "Windows" else LIN
 
 @dataclass
 class EncoderConfig:
-    # model_name: str = "all-MiniLM-L6-v2"
+    # 默认使用多语言模型，支持中英文
     model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    # 中文微调模型路径
+    chinese_model_path: str = "models/finetuned_alphafin_zh"
+    # 英文微调模型路径
+    english_model_path: str = "models/finetuned_finbert_tatqa"
     cache_dir: str = DEFAULT_CACHE_DIR
     device: Optional[str] = None  # Will auto-detect if None
     batch_size: int = 32
     max_length: int = 512
+
+@dataclass
+class RerankerConfig:
+    model_name: str = "Qwen/Qwen3-Reranker-0.6B"
+    cache_dir: str = DEFAULT_CACHE_DIR
+    device: Optional[str] = None  # Will auto-detect if None
+    use_quantization: bool = True
+    quantization_type: str = "8bit"  # "8bit" or "4bit"
+    batch_size: int = 4
+    enabled: bool = True  # 是否启用重排序器
 
 @dataclass
 class RetrieverConfig:
@@ -32,6 +46,9 @@ class RetrieverConfig:
     batch_size: int = 32
     use_gpu: bool = torch.cuda.is_available() # Dynamically set default based on hardware
     max_context_length: int = 100
+    # 重排序相关配置
+    retrieval_top_k: int = 100  # FAISS检索的top-k
+    rerank_top_k: int = 10      # 重排序后的top-k
 
 @dataclass
 class DataConfig:
@@ -61,6 +78,7 @@ class GeneratorConfig:
 class Config:
     cache_dir: str = DEFAULT_CACHE_DIR # Global cache directory
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
+    reranker: RerankerConfig = field(default_factory=RerankerConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     data: DataConfig = field(default_factory=DataConfig)
     modality: ModalityConfig = field(default_factory=ModalityConfig)
@@ -71,6 +89,8 @@ class Config:
         # Propagate the global cache_dir to other configs if they have it
         if hasattr(self.encoder, 'cache_dir'):
             self.encoder.cache_dir = self.cache_dir
+        if hasattr(self.reranker, 'cache_dir'):
+            self.reranker.cache_dir = self.cache_dir
         if hasattr(self.generator, 'cache_dir'):
             self.generator.cache_dir = self.cache_dir # Bug fix: Correctly assign global cache_dir
 
@@ -88,6 +108,10 @@ class Config:
                     use_faiss=True,
                     num_threads=8,
                     use_gpu=True
+                ),
+                reranker=RerankerConfig(
+                    enabled=True,
+                    use_quantization=True
                 ),
                 system=SystemConfig(
                     memory_limit=32,
