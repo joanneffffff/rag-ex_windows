@@ -225,10 +225,12 @@ class BilingualRetriever(Retriever):
         text: str,
         top_k: int = 3,
         return_scores: bool = False,
+        language: str = None,
     ) -> Union[List[DocumentWithMetadata], Tuple[List[DocumentWithMetadata], List[float]]]:
-        lang = detect(text)
-        
-        if lang == 'zh-cn' or lang == 'zh-tw':
+        if language is None:
+            lang = detect(text)
+            language = 'zh' if lang.startswith('zh') else 'en'
+        if language == 'zh':
             encoder = self.encoder_ch
             corpus_embeddings = self.corpus_embeddings_ch
             corpus_documents = self.corpus_documents_ch
@@ -238,15 +240,12 @@ class BilingualRetriever(Retriever):
             corpus_embeddings = self.corpus_embeddings_en
             corpus_documents = self.corpus_documents_en
             index = self.index_en
-
         if corpus_embeddings is None or corpus_embeddings.shape[0] == 0:
             if return_scores:
                 return [], []
             else:
                 return []
-
         query_embeddings = encoder.encode([text])
-        
         if self.use_faiss and index:
             distances, indices = index.search(query_embeddings.astype('float32'), top_k)
             results = []
@@ -260,11 +259,9 @@ class BilingualRetriever(Retriever):
                 top_k=top_k
             )
             results = hits[0]
-
         doc_indices = [hit['corpus_id'] for hit in results]
         scores = [hit['score'] for hit in results]
         documents = [corpus_documents[i] for i in doc_indices]
-
         if return_scores:
             return documents, scores
         else:

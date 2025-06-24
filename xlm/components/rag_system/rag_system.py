@@ -44,18 +44,21 @@ class RagSystem:
         # self.prompt_template is now obsolete
         self.retriever_top_k = retriever_top_k
 
-    def run(self, user_input: str) -> RagOutput:
+    def run(self, user_input: str, language: str = None) -> RagOutput:
         # 1. Detect language of the user's question
-        try:
-            lang = detect(user_input)
-        except LangDetectException:
-            lang = 'en' # Default to English if detection fails
-
-        is_chinese_q = lang.startswith('zh')
+        if language is None:
+            try:
+                lang = detect(user_input)
+            except LangDetectException:
+                lang = 'en' # Default to English if detection fails
+            is_chinese_q = lang.startswith('zh')
+            language = 'zh' if is_chinese_q else 'en'
+        else:
+            is_chinese_q = (language == 'zh')
         
         # 2. Retrieve relevant documents
         retrieved_documents, retriever_scores = self.retriever.retrieve(
-            text=user_input, top_k=self.retriever_top_k, return_scores=True
+            text=user_input, top_k=self.retriever_top_k, return_scores=True, language=language
         )
 
         # 3. Select prompt based on question language and format the context

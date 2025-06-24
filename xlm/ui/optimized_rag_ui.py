@@ -305,16 +305,26 @@ class OptimizedRagUI:
         """Process user question and return results"""
         if not question.strip():
             return "Please enter a question.", [], None
-        
         print(f"\nProcessing question: {question}")
         print(f"Reranker enabled: {reranker_checkbox}")
-        
-        # 根据checkbox状态决定是否使用reranker
-        use_reranker = reranker_checkbox and self.enable_reranker and self.reranker
-        
+        # Detect language and pass to rag_system
         try:
-            # 使用RAG系统处理问题
-            rag_output = self.rag_system.run(user_input=question)
+            from langdetect import detect
+            lang = detect(question)
+            # 中文字符兜底
+            def is_chinese(text):
+                return len([c for c in text if '\u4e00' <= c <= '\u9fff']) > max(1, len(text) // 6)
+            if lang.startswith('zh') or (lang == 'ko' and is_chinese(question)) or is_chinese(question):
+                language = 'zh'
+            else:
+                language = 'en'
+        except Exception as e:
+            print(f"Language detection failed: {e}, fallback to English.")
+            language = 'en'
+        print(f"Detected language: {language}")
+        use_reranker = reranker_checkbox and self.enable_reranker and self.reranker
+        try:
+            rag_output = self.rag_system.run(user_input=question, language=language)
             
             # 检测问题语言并打印数据源信息
             def is_chinese(text):
