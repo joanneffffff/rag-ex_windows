@@ -88,8 +88,14 @@ class LocalLLMGenerator(Generator):
     def generate(self, texts: List[str]) -> List[str]:
         responses = []
         for text in texts:
-            # Tokenize and generate
-            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=1024)
+            # 优化：直接用tokenizer.__call__处理padding和truncation
+            inputs = self.tokenizer(
+                text,
+                return_tensors="pt",
+                truncation=True,
+                max_length=1024,
+                padding="max_length"
+            )
             input_ids = inputs["input_ids"].to(self.device)
             attention_mask = inputs["attention_mask"].to(self.device)
             

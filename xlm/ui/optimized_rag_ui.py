@@ -7,6 +7,7 @@ from sentence_transformers import SentenceTransformer
 from gradio.components import Markdown
 import torch
 from langdetect import detect, LangDetectException
+import re
 
 from xlm.registry.generator import load_generator
 from xlm.registry.retriever import load_enhanced_retriever
@@ -89,9 +90,9 @@ class OptimizedRagUI:
         ]
         
         # Set environment variables for model caching
-        os.environ['TRANSFORMERS_CACHE'] = os.path.join(RERANKER_CACHE_DIR, 'transformers')
-        os.environ['HF_HOME'] = RERANKER_CACHE_DIR
-        os.environ['HF_DATASETS_CACHE'] = os.path.join(RERANKER_CACHE_DIR, 'datasets')
+        os.environ['TRANSFORMERS_CACHE'] = os.path.join(self.cache_dir, 'transformers')
+        os.environ['HF_HOME'] = self.cache_dir
+        os.environ['HF_DATASETS_CACHE'] = os.path.join(self.cache_dir, 'datasets')
         
         # Initialize system components
         self._init_components()
@@ -174,7 +175,7 @@ class OptimizedRagUI:
             print("\nStep 4. Loading reranker...")
             self.reranker = try_load_qwen_reranker(
                 model_name="Qwen/Qwen3-Reranker-0.6B",
-                cache_dir=str(RERANKER_CACHE_DIR)
+                cache_dir=self.cache_dir
             )
         else:
             self.reranker = None
@@ -183,7 +184,7 @@ class OptimizedRagUI:
         self.generator = load_generator(
             generator_model_name=self.generator_model_name,
             use_local_llm=True,
-            cache_dir=str(RERANKER_CACHE_DIR)
+            cache_dir=self.cache_dir
         )
         
         print("\nStep 6. Initializing RAG system...")
@@ -237,17 +238,13 @@ class OptimizedRagUI:
             with gr.Row():
                 with gr.Column(scale=1):
                     Markdown(
-                        f'<p style="text-align: left; font-size:120%; font-weight: bold">Data Source:</p>'
+                        f'<p style="text-align: center; font-size:200%; font-weight: bold">{self.title}</p>'
                     )
-                with gr.Column(scale=2):
+                with gr.Column(scale=1):
                     data_source_display = gr.Textbox(
-                        value="Auto-detect (Chinese→AlphaFin, English→TAT_QA)",
+                        value="Auto-detect",
                         label="Data Source",
                         interactive=False
-                    )
-                with gr.Column(scale=8):
-                    Markdown(
-                        f'<p style="text-align: center; font-size:200%; font-weight: bold">{self.title}</p>'
                     )
             # Input area
             with gr.Row():
@@ -320,10 +317,15 @@ class OptimizedRagUI:
             rag_output = self.rag_system.run(user_input=question)
             
             # 检测问题语言并打印数据源信息
+            def is_chinese(text):
+                return len(re.findall(r'[\u4e00-\u9fff]', text)) > max(1, len(text) // 6)
             try:
                 lang = detect(question)
-                is_chinese = lang.startswith('zh')
-                data_source = "AlphaFin" if is_chinese else "TAT_QA"
+                # 修正：如果检测为韩文但内容明显是中文，强制设为中文
+                if lang == 'ko' and is_chinese(question):
+                    lang = 'zh-cn'
+                is_chinese_q = lang.startswith('zh')
+                data_source = "AlphaFin" if is_chinese_q else "TAT_QA"
                 print(f"Detected language: {lang} -> Using data source: {data_source}")
             except LangDetectException:
                 print("Language detection failed, defaulting to English -> TAT_QA")
