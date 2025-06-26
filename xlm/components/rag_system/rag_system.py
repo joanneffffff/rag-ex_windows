@@ -7,15 +7,14 @@ import re
 from langdetect import detect, LangDetectException
 
 # Define the robust "Golden Prompts" directly in the code
-PROMPT_TEMPLATE_EN = """You are a professional financial analyst. Answer the question based on the provided context.
+PROMPT_TEMPLATE_EN = """You are a highly analytical and precise financial expert. Your task is to answer the user's question **strictly based on the provided <context> information**.
 
 Requirements:
-1. Use concise, direct answers
-2. Only use information from the provided context
-3. If the answer is not in the context, say "The answer cannot be found in the provided context"
-4. Do not repeat the question
-5. Do not add information outside the context
-6. Ensure complete sentences
+1.  **Strictly adhere to the provided <context>. Do not use any external knowledge or make assumptions.**
+2.  If the <context> does not contain sufficient information to answer the question, state: "The answer cannot be found in the provided context."
+3.  For questions involving financial predictions or future outlook, prioritize information explicitly stated as forecasts or outlooks within the <context>. If the <context> specifies a report date, base your answer on that date's perspective.
+4.  Provide a concise and direct answer in complete sentences.
+5.  Do not repeat the question or add conversational fillers.
 
 Context:
 {context}
@@ -24,15 +23,14 @@ Question: {question}
 
 Answer:"""
 
-PROMPT_TEMPLATE_ZH = """基于上下文信息回答问题。
+PROMPT_TEMPLATE_ZH = """你是一位严谨且精确的金融分析专家。请你**严格根据以下<context>标签内提供的信息**来回答用户的问题。
 
 要求：
-1. 用中文回答
-2. 只基于提供的上下文信息
-3. 如果上下文中没有答案，直接说"在提供的上下文中找不到答案"
-4. 回答要简洁、直接，不超过2-3句话
-5. 不要重复问题内容
-6. 不要添加上下文之外的信息
+1.  **严格遵循<context>中提供的信息。切勿使用任何外部知识或进行猜测。**
+2.  如果<context>中没有足够的信息来回答问题，请直接说："在提供的上下文中找不到答案。"
+3.  对于涉及金融预测或未来展望的问题，请优先提取<context>中明确陈述为预测或展望的信息。如果<context>中提及了报告发布日期，请以该日期时的视角进行回答。
+4.  用中文进行回答，内容要简洁、直接，形成完整的句子，回答不超过2-3句话。
+5.  不要重复问题内容或添加无关的寒暄。
 
 上下文:
 {context}

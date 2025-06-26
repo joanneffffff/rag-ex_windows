@@ -1,0 +1,208 @@
+#!/usr/bin/env python3
+"""最终测试脚本 - 验证完整的评估流程"""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.append(str(Path(__file__).parent))
+
+def test_simple_evaluation():
+    """简单的评估测试"""
+    print("=== 简单评估测试 ===")
+    
+    try:
+        from config.parameters import Config
+        from xlm.components.retriever.bilingual_retriever import BilingualRetriever
+        from xlm.components.encoder.finbert import FinbertEncoder
+        from xlm.utils.optimized_data_loader import OptimizedDataLoader
+        from xlm.dto.dto import DocumentWithMetadata, DocumentMetadata
+        
+        config = Config()
+        
+        print("1. 加载编码器...")
+        encoder_ch = FinbertEncoder(
+            model_name="models/finetuned_alphafin_zh",
+            cache_dir=config.encoder.cache_dir,
+        )
+        encoder_en = FinbertEncoder(
+            model_name="models/finetuned_finbert_tatqa",
+            cache_dir=config.encoder.cache_dir,
+        )
+        print("   ✅ 编码器加载成功")
+        
+        print("\n2. 加载少量训练数据...")
+        data_loader = OptimizedDataLoader(
+            data_dir="data",
+            max_samples=100,  # 只加载100个样本
+            chinese_document_level=True,
+            english_chunk_level=True,
+            include_eval_data=False
+        )
+        
+        chinese_chunks = data_loader.chinese_docs
+        english_chunks = data_loader.english_docs
+        
+        print("\n3. 添加评估数据到知识库...")
+        # 加载评估数据
+        def load_eval_data(eval_file: str):
+            data = []
+            with open(eval_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if line.strip():
+                        data.append(json.loads(line))
+            return data
+        
+        # 添加中文评估数据
+        alphafin_eval = load_eval_data("evaluate_mrr/alphafin_eval.jsonl")
+        for sample in alphafin_eval[:10]:  # 只添加前10个样本
+            if sample.get('context'):
+                eval_doc = DocumentWithMetadata(
+                    content=json.dumps({
+                        'query': sample.get('query', ''),
+                        'context': sample.get('context', ''),
+                        'doc_id': sample.get('doc_id', ''),
+                        'answer': sample.get('answer', '')
+                    }),
+                    metadata=DocumentMetadata(
+                        source='eval_alphafin',
+                        created_at='',
+                        author='',
+                        language='chinese'
+                    )
+                )
+                chinese_chunks.append(eval_doc)
+        
+        # 添加英文评估数据
+        tatqa_eval = load_eval_data("evaluate_mrr/tatqa_eval.jsonl")
+        for sample in tatqa_eval[:10]:  # 只添加前10个样本
+            if sample.get('context'):
+                eval_doc = DocumentWithMetadata(
+                    content=json.dumps({
+                        'query': sample.get('query', ''),
+                        'context': sample.get('context', ''),
+                        'answer': sample.get('answer', '')
+                    }),
+                    metadata=DocumentMetadata(
+                        source='eval_tatqa',
+                        created_at='',
+                        author='',
+                        language='english'
+                    )
+                )
+                english_chunks.append(eval_doc)
+        
+        print(f"   添加了 {len(alphafin_eval[:10])} 个中文评估样本")
+        print(f"   添加了 {len(tatqa_eval[:10])} 个英文评估样本")
+        print(f"   总知识库大小: {len(chinese_chunks)} 中文, {len(english_chunks)} 英文")
+        
+        print("\n4. 创建检索器...")
+        retriever = BilingualRetriever(
+            encoder_en=encoder_en,
+            encoder_ch=encoder_ch,
+            corpus_documents_en=english_chunks,
+            corpus_documents_ch=chinese_chunks,
+            use_faiss=True,
+            use_gpu=False,
+            batch_size=8,
+            cache_dir=config.encoder.cache_dir
+        )
+        print("   ✅ 检索器创建成功")
+        
+        print("\n5. 测试中文检索...")
+        # 测试第一个中文评估样本
+        test_sample = alphafin_eval[0]
+        query = test_sample['query']
+        context = test_sample['context']
+        doc_id = test_sample['doc_id']
+        
+        print(f"   查询: {query}")
+        print(f"   正确答案ID: {doc_id}")
+        
+        # 检索
+        retrieved_result = retriever.retrieve(
+            text=query, 
+            top_k=10, 
+            return_scores=True, 
+            language='zh'
+        )
+        
+        if isinstance(retrieved_result, tuple):
+            retrieved_docs, scores = retrieved_result
+        else:
+            retrieved_docs = retrieved_result
+            scores = []
+        
+        print(f"   检索到 {len(retrieved_docs)} 个文档")
+        
+        # 使用改进的匹配逻辑
+        from test_retrieval_mrr import find_correct_document_rank
+        
+        found_rank = find_correct_document_rank(
+            context=context,
+            retrieved_docs=retrieved_docs,
+            sample=test_sample,
+            encoder=encoder_ch
+        )
+        
+        print(f"   找到正确答案的排名: {found_rank}")
+        
+        if found_rank > 0:
+            print(f"   ✅ 成功找到正确答案！")
+            matched_doc = retrieved_docs[found_rank-1]
+            print(f"   匹配文档内容: {matched_doc.content[:200]}...")
+        else:
+            print(f"   ❌ 未找到正确答案")
+            print(f"   前3个检索结果:")
+            for i, doc in enumerate(retrieved_docs[:3]):
+                print(f"     {i+1}. {doc.content[:100]}...")
+        
+        print("\n6. 测试英文检索...")
+        # 测试第一个英文评估样本
+        test_sample_en = tatqa_eval[0]
+        query_en = test_sample_en['query']
+        context_en = test_sample_en['context']
+        
+        print(f"   查询: {query_en}")
+        
+        # 检索
+        retrieved_result_en = retriever.retrieve(
+            text=query_en, 
+            top_k=10, 
+            return_scores=True, 
+            language='en'
+        )
+        
+        if isinstance(retrieved_result_en, tuple):
+            retrieved_docs_en, scores_en = retrieved_result_en
+        else:
+            retrieved_docs_en = retrieved_result_en
+            scores_en = []
+        
+        print(f"   检索到 {len(retrieved_docs_en)} 个文档")
+        
+        found_rank_en = find_correct_document_rank(
+            context=context_en,
+            retrieved_docs=retrieved_docs_en,
+            sample=test_sample_en,
+            encoder=encoder_en
+        )
+        
+        print(f"   找到正确答案的排名: {found_rank_en}")
+        
+        if found_rank_en > 0:
+            print(f"   ✅ 成功找到正确答案！")
+        else:
+            print(f"   ❌ 未找到正确答案")
+        
+        print("\n🎉 评估测试完成！")
+        return True
+        
+    except Exception as e:
+        print(f"❌ 测试失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+if __name__ == "__main__":
+    test_simple_evaluation() 

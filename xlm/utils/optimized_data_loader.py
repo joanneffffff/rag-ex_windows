@@ -15,6 +15,8 @@ from datasets import load_dataset
 from xlm.dto.dto import DocumentWithMetadata, DocumentMetadata
 import pandas as pd
 from config.parameters import Config
+import re
+import ast
 
 class OptimizedDataLoader:
     def __init__(
@@ -251,8 +253,11 @@ class OptimizedDataLoader:
                     metadata = {"source": "alphafin", "language": "chinese"}
                 
                 if content and isinstance(content, str):
-                    # 文档级别处理：直接使用整个文档作为chunk
+                    # 文档级别处理：保持原始格式，避免过度分割
                     if self.chinese_document_level:
+                        # 直接使用原始内容，不进行JSON转换
+                        # 这样可以保持文档的完整性，避免过度分割
+                        
                         # 检查文档长度，如果太长则适当分割
                         if len(content) > 8192:  # 8K字符限制
                             # 按段落分割长文档
@@ -291,7 +296,7 @@ class OptimizedDataLoader:
                                     )
                                     alphafin_docs.append(chunk_doc)
                         else:
-                            # 文档长度适中，直接使用
+                            # 文档长度适中，直接使用原始内容
                             doc_metadata = DocumentMetadata(
                                 source=metadata.get('source', 'alphafin'),
                                 created_at=metadata.get('created_at', ''),
@@ -299,11 +304,11 @@ class OptimizedDataLoader:
                                 language="chinese"
                             )
                             
-                            doc = DocumentWithMetadata(
-                                content=content,
+                            alphafin_doc = DocumentWithMetadata(
+                                content=content,  # 使用原始内容
                                 metadata=doc_metadata
                             )
-                            alphafin_docs.append(doc)
+                            alphafin_docs.append(alphafin_doc)
                     else:
                         # 使用原有的chunk级别处理
                         doc_metadata = DocumentMetadata(
@@ -570,18 +575,72 @@ class OptimizedDataLoader:
                             eval_docs.append(eval_doc)
                     else:
                         # 英文或其他语言，使用简单chunking
-                        doc_metadata = DocumentMetadata(
-                            source=metadata.get('source', f'eval_{language}'),
-                            created_at="",
-                            author="",
-                            language=language
-                        )
-                        
-                        eval_doc = DocumentWithMetadata(
-                            content=content,
-                            metadata=doc_metadata
-                        )
-                        eval_docs.append(eval_doc)
+                        if language == "english" and self.english_chunk_level:
+                            # 英文使用与训练数据相同的chunk策略
+                            if len(content) > 1500:  # 英文chunk长度限制
+                                # 按段落分割长文档
+                                paragraphs = content.split('\n\n')
+                                if len(paragraphs) > 1:
+                                    # 合并段落直到达到合理长度
+                                    merged_chunks = self._merge_paragraphs_to_chunks(paragraphs, max_length=1500)
+                                    for i, chunk_content in enumerate(merged_chunks):
+                                        chunk_metadata = DocumentMetadata(
+                                            source=f"{metadata.get('source', f'eval_{language}')}_chunk_{i}",
+                                            created_at="",
+                                            author="",
+                                            language=language
+                                        )
+                                        
+                                        chunk_doc = DocumentWithMetadata(
+                                            content=chunk_content,
+                                            metadata=chunk_metadata
+                                        )
+                                        eval_docs.append(chunk_doc)
+                                else:
+                                    # 单个长段落，按句子分割
+                                    sentences = content.split('. ')
+                                    merged_chunks = self._merge_sentences_to_chunks(sentences, max_length=1500)
+                                    for i, chunk_content in enumerate(merged_chunks):
+                                        chunk_metadata = DocumentMetadata(
+                                            source=f"{metadata.get('source', f'eval_{language}')}_chunk_{i}",
+                                            created_at="",
+                                            author="",
+                                            language=language
+                                        )
+                                        
+                                        chunk_doc = DocumentWithMetadata(
+                                            content=chunk_content,
+                                            metadata=chunk_metadata
+                                        )
+                                        eval_docs.append(chunk_doc)
+                            else:
+                                # 文档长度适中，直接使用
+                                doc_metadata = DocumentMetadata(
+                                    source=metadata.get('source', f'eval_{language}'),
+                                    created_at="",
+                                    author="",
+                                    language=language
+                                )
+                                
+                                eval_doc = DocumentWithMetadata(
+                                    content=content,
+                                    metadata=doc_metadata
+                                )
+                                eval_docs.append(eval_doc)
+                        else:
+                            # 其他语言，使用简单处理
+                            doc_metadata = DocumentMetadata(
+                                source=metadata.get('source', f'eval_{language}'),
+                                created_at="",
+                                author="",
+                                language=language
+                            )
+                            
+                            eval_doc = DocumentWithMetadata(
+                                content=content,
+                                metadata=doc_metadata
+                            )
+                            eval_docs.append(eval_doc)
             
         except Exception as e:
             self.logger.error(f"Error processing evaluation data: {str(e)}")
@@ -589,3 +648,149 @@ class OptimizedDataLoader:
             self.logger.error(traceback.format_exc())
         
         return eval_docs 
+
+def convert_json_context_to_natural_language_chunks(json_str_context, company_name="公司"):
+    """
+    Parses a JSON string context from AlphaFin and converts it into a list of
+    natural language chunks, handling various formats and cleaning.
+    """
+    chunks = []
+    
+    if not json_str_context or not json_str_context.strip():
+        return chunks
+
+    processed_str_context = json_str_context.replace("\\n", "\n")
+
+    cleaned_initial = re.sub(re.escape("【问题】:"), "", processed_str_context)
+    cleaned_initial = re.sub(re.escape("【答案】:"), "", cleaned_initial).strip()
+    
+    cleaned_initial = cleaned_initial.replace('，', ',')
+    cleaned_initial = cleaned_initial.replace('：', ':')
+    cleaned_initial = cleaned_initial.replace('【', '') 
+    cleaned_initial = cleaned_initial.replace('】', '') 
+    cleaned_initial = cleaned_initial.replace('\u3000', ' ')
+    cleaned_initial = cleaned_initial.replace('\xa0', ' ').strip()
+    cleaned_initial = re.sub(r'\s+', ' ', cleaned_initial).strip()
+
+    report_match = re.match(
+        r"这是以(.+?)为题目,在(\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?)日期发布的研究报告。研报内容如下: (.+)", 
+        cleaned_initial, 
+        re.DOTALL
+    )
+    
+    if report_match:
+        report_title_full = report_match.group(1).strip()
+        report_date = report_match.group(2).strip()
+        report_raw_content = report_match.group(3).strip() 
+
+        content_after_second_title_match = re.match(r"研报题目是:(.+)", report_raw_content, re.DOTALL)
+        if content_after_second_title_match:
+            report_content_preview = content_after_second_title_match.group(1).strip()
+        else:
+            report_content_preview = report_raw_content 
+            
+        report_content_preview = re.sub(re.escape("【问题】:"), "", report_content_preview)
+        report_content_preview = re.sub(re.escape("【答案】:"), "", report_content_preview).strip()
+        report_content_preview = re.sub(r'\s+', ' ', report_content_preview).strip() 
+
+        company_stock_match = re.search(r"(.+?)（(\d{6}\.\w{2})）", report_title_full)
+        company_info = ""
+        if company_stock_match:
+            report_company_name = company_stock_match.group(1).strip()
+            report_stock_code = company_stock_match.group(2).strip()
+            company_info = f"，公司名称：{report_company_name}，股票代码：{report_stock_code}"
+            report_title_main = re.sub(r"（\d{6}\.\w{2}）", "", report_title_full).strip()
+        else:
+            report_title_main = report_title_full
+
+        chunk_text = f"一份发布日期为 {report_date} 的研究报告，其标题是：{report_title_main}{company_info}。报告摘要内容：{report_content_preview.rstrip('...') if report_content_preview.endswith('...') else report_content_preview}。"
+        chunks.append(chunk_text)
+        return chunks 
+
+    extracted_dict_str = None
+    parsed_data = None 
+
+    temp_dict_search_str = re.sub(r"Timestamp\(['\"](.*?)['\"]\)", r"'\1'", cleaned_initial) 
+    all_dict_matches = re.findall(r"(\{.*?\})", temp_dict_search_str, re.DOTALL) 
+
+    for potential_dict_str in all_dict_matches:
+        cleaned_potential_dict_str = potential_dict_str.strip()
+        
+        json_compatible_str_temp = cleaned_potential_dict_str.replace("'", '"')
+        try:
+            parsed_data_temp = json.loads(json_compatible_str_temp)
+            if isinstance(parsed_data_temp, dict):
+                extracted_dict_str = cleaned_potential_dict_str
+                parsed_data = parsed_data_temp
+                break 
+        except json.JSONDecodeError:
+            pass 
+
+        fixed_for_ast_eval_temp = re.sub(
+            r"(?<!['\"\w.])\b(0[1-9]\d*)\b(?![\d.]|['\"\w.])", 
+            r"'\1'", 
+            cleaned_potential_dict_str
+        )
+        try:
+            parsed_data_temp = ast.literal_eval(fixed_for_ast_eval_temp)
+            if isinstance(parsed_data_temp, dict):
+                extracted_dict_str = cleaned_potential_dict_str
+                parsed_data = parsed_data_temp
+                break 
+        except (ValueError, SyntaxError):
+            pass 
+
+    if extracted_dict_str is not None and isinstance(parsed_data, dict):
+        for metric_name, time_series_data in parsed_data.items():
+            if not isinstance(metric_name, str):
+                metric_name = str(metric_name)
+
+            cleaned_metric_name = re.sub(r'（.*?）', '', metric_name).strip()
+            
+            if not isinstance(time_series_data, dict):
+                if time_series_data is not None and str(time_series_data).strip():
+                    chunks.append(f"{company_name}的{cleaned_metric_name}数据为：{time_series_data}。")
+                continue
+            if not time_series_data:
+                continue
+            
+            try:
+                sorted_dates = sorted(time_series_data.keys(), key=str)
+            except TypeError:
+                sorted_dates = [str(k) for k in time_series_data.keys()]
+                
+            description_parts = []
+            for date in sorted_dates:
+                value = time_series_data[date]
+                if isinstance(value, (int, float)):
+                    formatted_value = f"{value:.4f}".rstrip('0').rstrip('.') if isinstance(value, float) else str(value)
+                else:
+                    formatted_value = str(value)
+                description_parts.append(f"在{date}为{formatted_value}")
+            
+            if description_parts:
+                if len(description_parts) <= 3:
+                    full_description = f"{company_name}的{cleaned_metric_name}数据: " + "，".join(description_parts) + "。"
+                else:
+                    first_part = "，".join(description_parts[:3])
+                    last_part = "，".join(description_parts[-3:])
+                    if len(sorted_dates) > 6:
+                        full_description = f"{company_name}的{cleaned_metric_name}数据从{sorted_dates[0]}到{sorted_dates[-1]}，主要变化为：{first_part}，...，{last_part}。"
+                    else:
+                        full_description = f"{company_name}的{cleaned_metric_name}数据: " + "，".join(description_parts) + "。"
+                chunks.append(full_description)
+        return chunks 
+
+    pure_text = cleaned_initial
+    pure_text = re.sub(r"^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?[_;]?", "", pure_text, 1).strip()
+    pure_text = re.sub(r"^[\u4e00-\u9fa5]+(?:/[\u4e00-\u9fa5]+)?\d{4}年\d{2}月\d{2}日\d{2}:\d{2}:\d{2}(?:据[\u4e00-\u9fa5]+?,)?\d{1,2}月\d{1,2}日,?", "", pure_text).strip()
+    pure_text = re.sub(r"^(?:市场资金进出)?截至周[一二三四五六日]收盘,?", "", pure_text).strip()
+    pure_text = re.sub(r"^[\u4e00-\u9fa5]+?中期净利预减\d+%-?\d*%(?:[\u4e00-\u9fa5]+?\d{1,2}月\d{1,2}日晚间公告,)?", "", pure_text).strip()
+
+    if pure_text: 
+        chunks.append(pure_text)
+    else:
+        print(f"警告：未能在 context 字符串中找到有效结构 (字典、研报或纯文本)。原始字符串（前100字符）：{json_str_context[:100]}...")
+        chunks.append(f"原始格式，解析失败或无有效结构：{json_str_context.strip()[:100]}...")
+
+    return chunks 
