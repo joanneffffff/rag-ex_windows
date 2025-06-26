@@ -8,7 +8,6 @@ import torch
 from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 
-
 # --- Platform-Aware Path Configuration ---
 # Set the default Hugging Face cache directory based on the operating system.
 # You can modify the Windows path here if needed (e.g., "D:/AI/huggingface").
@@ -85,7 +84,7 @@ class GeneratorConfig:
 
 @dataclass
 class Config:
-    cache_dir: str = EMBEDDING_CACHE_DIR # Global cache directory
+    cache_dir: str = DEFAULT_CACHE_DIR # Global cache directory - 改为DEFAULT_CACHE_DIR
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
     retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
@@ -97,11 +96,11 @@ class Config:
     def __post_init__(self):
         # Propagate the global cache_dir to other configs if they have it
         if hasattr(self.encoder, 'cache_dir'):
-            self.encoder.cache_dir = self.cache_dir
+            self.encoder.cache_dir = EMBEDDING_CACHE_DIR  # 编码器使用embedding缓存目录
         if hasattr(self.reranker, 'cache_dir'):
-            self.reranker.cache_dir = RERANKER_CACHE_DIR
+            self.reranker.cache_dir = RERANKER_CACHE_DIR  # 重排序器使用DEFAULT_CACHE_DIR
         if hasattr(self.generator, 'cache_dir'):
-            self.generator.cache_dir = RERANKER_CACHE_DIR
+            self.generator.cache_dir = GENERATOR_CACHE_DIR  # 生成器使用DEFAULT_CACHE_DIR
 
     @classmethod
     def load_environment_config(cls) -> 'Config':

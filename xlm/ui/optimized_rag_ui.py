@@ -137,21 +137,24 @@ class OptimizedRagUI:
         from xlm.components.retriever.bilingual_retriever import BilingualRetriever
         from xlm.components.encoder.finbert import FinbertEncoder
         
+        # 使用config中的正确缓存目录
+        config = Config()
+        
         print("\nStep 2. Loading Chinese encoder (models/finetuned_alphafin_zh)...")
         encoder_ch = FinbertEncoder(
             model_name="models/finetuned_alphafin_zh",
-            cache_dir=self.cache_dir,
+            cache_dir=config.encoder.cache_dir,  # 使用encoder的缓存目录
         )
         print("Step 3. Loading English encoder (models/finetuned_finbert_tatqa)...")
         encoder_en = FinbertEncoder(
             model_name="models/finetuned_finbert_tatqa",
-            cache_dir=self.cache_dir,
+            cache_dir=config.encoder.cache_dir,  # 使用encoder的缓存目录
         )
         
         # 根据use_existing_embedding_index参数决定是否使用现有索引
         if self.use_existing_embedding_index:
             print("Using existing embedding index (if available)...")
-            cache_dir = self.cache_dir
+            cache_dir = config.encoder.cache_dir  # 使用encoder的缓存目录
         else:
             print("Forcing to recompute embeddings (ignoring existing cache)...")
             import tempfile
@@ -179,7 +182,7 @@ class OptimizedRagUI:
             print("\nStep 4. Loading reranker...")
             self.reranker = try_load_qwen_reranker(
                 model_name="Qwen/Qwen3-Reranker-0.6B",
-                cache_dir=self.cache_dir
+                cache_dir=config.reranker.cache_dir  # 使用reranker的缓存目录
             )
         else:
             self.reranker = None
@@ -188,12 +191,10 @@ class OptimizedRagUI:
         self.generator = load_generator(
             generator_model_name=self.generator_model_name,
             use_local_llm=True,
-            cache_dir=self.cache_dir
+            cache_dir=config.generator.cache_dir  # 使用generator的缓存目录
         )
         
         print("\nStep 6. Initializing RAG system...")
-        # 重新导入Config确保可用
-        config = Config()
         
         self.rag_system = RagSystem(
             retriever=self.retriever,
