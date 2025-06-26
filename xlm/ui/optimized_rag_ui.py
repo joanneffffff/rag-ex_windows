@@ -1,20 +1,29 @@
-import os
-import gradio as gr
-from typing import List, Optional
-import faiss
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from gradio.components import Markdown
-import torch
-from langdetect import detect, LangDetectException
-import re
+#!/usr/bin/env python3
+"""
+Optimized RAG UI with FAISS support
+"""
 
-from xlm.registry.generator import load_generator
-from xlm.registry.retriever import load_enhanced_retriever
+import os
+import sys
+import re
+from pathlib import Path
+from typing import List, Optional, Tuple
+import gradio as gr
+import numpy as np
+import torch
+import faiss
+from langdetect import detect, LangDetectException
+
+# Add parent directory to path
+sys.path.append(str(Path(__file__).parent.parent.parent))
+
+from xlm.dto.dto import DocumentWithMetadata, DocumentMetadata
 from xlm.components.rag_system.rag_system import RagSystem
+from xlm.components.generator.generator import Generator
 from xlm.components.retriever.reranker import QwenReranker
 from xlm.utils.visualizer import Visualizer
-from xlm.dto.dto import DocumentWithMetadata, DocumentMetadata
+from xlm.registry.retriever import load_enhanced_retriever
+from xlm.registry.generator import load_generator
 from config.parameters import Config, EncoderConfig, RetrieverConfig, ModalityConfig, EMBEDDING_CACHE_DIR, RERANKER_CACHE_DIR
 
 def try_load_qwen_reranker(model_name, cache_dir=None):
@@ -403,92 +412,156 @@ class OptimizedRagUI:
         # 根据数据源选择决定是否使用重排序器
         use_reranker = reranker_checkbox and self.enable_reranker and self.reranker is not None
         
-        try:
-            rag_output = self.rag_system.run(user_input=question, language=language)
-            
-            # 检测问题语言并打印数据源信息
-            def is_chinese(text):
-                return len(re.findall(r'[\u4e00-\u9fff]', text)) > max(1, len(text) // 6)
+        # === 新增：仅对中文query启用优化检索 ===
+        rag_output = None
+        if language == 'zh':
             try:
-                lang = detect(question)
-                # 修正：如果检测为韩文但内容明显是中文，强制设为中文
-                if lang == 'ko' and is_chinese(question):
-                    lang = 'zh-cn'
-                is_chinese_q = lang.startswith('zh')
-                detected_data_source = "AlphaFin" if is_chinese_q else "TAT_QA"
-                print(f"Detected language: {lang} -> Using data source: {detected_data_source}")
-            except LangDetectException:
-                print("Language detection failed, defaulting to English -> TAT_QA")
-                detected_data_source = "TAT_QA"
-            
-            # Apply reranker if enabled
-            if use_reranker and rag_output.retrieved_documents and self.reranker is not None:
-                print("Applying reranker...")
-                # Prepare documents for reranking
-                docs_for_rerank = [(doc.content, doc.metadata.source) for doc in rag_output.retrieved_documents]
-                
-                # Rerank documents
-                reranked_docs = self.reranker.rerank(
-                    query=question,
-                    documents=[doc[0] for doc in docs_for_rerank]  # 只传入文档内容，不传入元数据
-                )
-                
-                # Update retrieved documents with reranked results
-                if reranked_docs:
-                    # Create new document objects with reranked order
-                    reranked_documents = []
-                    reranked_scores = []
-                    
-                    for doc_content, score in reranked_docs:
-                        # Find original document
-                        for orig_doc in rag_output.retrieved_documents:
-                            if orig_doc.content == doc_content:
-                                reranked_documents.append(orig_doc)
-                                reranked_scores.append(score)
-                                break
-                    
-                    rag_output.retrieved_documents = reranked_documents
-                    rag_output.retriever_scores = reranked_scores
-            
-            # 检索结果去重，只显示前20条chunk
-            unique_docs = []
-            seen_contents = set()
-            for doc, score in zip(rag_output.retrieved_documents, rag_output.retriever_scores):
-                if doc.content not in seen_contents:
-                    unique_docs.append((doc, score))
-                    seen_contents.add(doc.content)
-                if len(unique_docs) >= 20:
-                    break
-            
-            # Prepare answer
-            answer = rag_output.generated_responses[0] if rag_output.generated_responses else "Unable to generate answer"
-            
-            # 调试信息：打印prompt和语言信息
-            print(f"\n=== DEBUG INFO ===")
-            print(f"Question language: {lang}")
-            print(f"Data source: {detected_data_source}")
-            print(f"User selected data source: {datasource}")
-            print(f"Prompt template used: {rag_output.metadata.get('prompt_template', 'Unknown')}")
-            print(f"Generated response: {answer[:200]}...")  # 只打印前200个字符
-            print(f"=== END DEBUG ===\n")
-            
-            # Add reranker info to answer if used
-            if use_reranker:
-                answer = f"[Reranker: Enabled] {answer}"
+                from simple_query_test import SimpleQueryOptimizer
+            except ImportError:
+                print("simple_query_test.py未找到或导入失败，回退到普通检索。")
+                rag_output = self.rag_system.run(user_input=question, language=language)
             else:
-                answer = f"[Reranker: Disabled] {answer}"
+                optimizer = SimpleQueryOptimizer()
+                entity = optimizer.extract_entities(question)
+                query_variants = optimizer.create_optimized_queries(question, entity)
+                all_docs = []
+                all_scores = []
+                seen_doc_ids = set()
+                for q in query_variants:
+                    docs, scores = self.rag_system.retriever.retrieve(
+                        text=q, top_k=self.rag_system.retriever_top_k, return_scores=True, language=language
+                    )
+                    for doc, score in zip(docs, scores):
+                        doc_id = getattr(doc, 'id', None)
+                        if doc_id not in seen_doc_ids:
+                            all_docs.append(doc)
+                            all_scores.append(score)
+                            seen_doc_ids.add(doc_id)
+                    if len(all_docs) >= self.rag_system.retriever_top_k:
+                        break
+                # 构造RagOutput前，增加实体过滤
+                def filter_by_entity(docs, scores, entity):
+                    filtered_docs = []
+                    filtered_scores = []
+                    for doc, score in zip(docs, scores):
+                        if entity.stock_code and entity.stock_code in doc.content:
+                            filtered_docs.append(doc)
+                            filtered_scores.append(score)
+                        elif entity.company_name and entity.company_name in doc.content:
+                            filtered_docs.append(doc)
+                            filtered_scores.append(score)
+                    if filtered_docs:
+                        return filtered_docs, filtered_scores
+                    else:
+                        return docs, scores
+                all_docs, all_scores = filter_by_entity(all_docs, all_scores, entity)
+                # 构造RagOutput
+                if not all_docs:
+                    rag_output = self.rag_system.run(user_input=question, language=language)
+                else:
+                    # 只生成一次prompt和答案
+                    context_str = "\n\n".join([doc.content for doc in all_docs[:self.rag_system.retriever_top_k]])
+                    # 修复：从rag_system模块导入prompt模板
+                    from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_ZH
+                    prompt = PROMPT_TEMPLATE_ZH.format(context=context_str, question=question)
+                    generated_responses = self.rag_system.generator.generate(texts=[prompt])
+                    # 修复：使用正确的RagOutput类型
+                    from xlm.dto.dto import RagOutput
+                    rag_output = RagOutput(
+                        retrieved_documents=all_docs[:self.rag_system.retriever_top_k],
+                        retriever_scores=all_scores[:self.rag_system.retriever_top_k],
+                        prompt=prompt,
+                        generated_responses=generated_responses,
+                        metadata=dict(
+                            # 修复：安全访问encoder_ch属性
+                            retriever_model_name=getattr(getattr(self.rag_system.retriever, 'encoder_ch', None), 'model_name', 'unknown') if hasattr(self.rag_system.retriever, 'encoder_ch') else 'unknown',
+                            top_k=self.rag_system.retriever_top_k,
+                            generator_model_name=self.rag_system.generator.model_name,
+                            prompt_template="Golden-ZH",
+                            question_language="zh"
+                        ),
+                    )
+        else:
+            rag_output = self.rag_system.run(user_input=question, language=language)
+        
+        # 检测问题语言并打印数据源信息
+        def is_chinese(text):
+            return len(re.findall(r'[\u4e00-\u9fff]', text)) > max(1, len(text) // 6)
+        try:
+            lang = detect(question)
+            # 修正：如果检测为韩文但内容明显是中文，强制设为中文
+            if lang == 'ko' and is_chinese(question):
+                lang = 'zh-cn'
+            is_chinese_q = lang.startswith('zh')
+            detected_data_source = "AlphaFin" if is_chinese_q else "TAT_QA"
+            print(f"Detected language: {lang} -> Using data source: {detected_data_source}")
+        except LangDetectException:
+            print("Language detection failed, defaulting to English -> TAT_QA")
+            detected_data_source = "TAT_QA"
+        
+        # Apply reranker if enabled
+        if use_reranker and rag_output.retrieved_documents and self.reranker is not None:
+            print("Applying reranker...")
+            # Prepare documents for reranking
+            docs_for_rerank = [(doc.content, doc.metadata.source) for doc in rag_output.retrieved_documents]
             
-            # Prepare context data
-            context_data = []
-            for doc, score in unique_docs:
-                context_data.append([f"{score:.4f}", doc.content])
+            # Rerank documents
+            reranked_docs = self.reranker.rerank(
+                query=question,
+                documents=[doc[0] for doc in docs_for_rerank]  # 只传入文档内容，不传入元数据
+            )
             
-            return answer, context_data, None
-            
-        except Exception as e:
-            error_msg = f"Error processing question: {str(e)}"
-            print(error_msg)
-            return error_msg, [], None
+            # Update retrieved documents with reranked results
+            if reranked_docs:
+                # Create new document objects with reranked order
+                reranked_documents = []
+                reranked_scores = []
+                
+                for doc_content, score in reranked_docs:
+                    # Find original document
+                    for orig_doc in rag_output.retrieved_documents:
+                        if orig_doc.content == doc_content:
+                            reranked_documents.append(orig_doc)
+                            reranked_scores.append(score)
+                            break
+                
+                rag_output.retrieved_documents = reranked_documents
+                rag_output.retriever_scores = reranked_scores
+        
+        # 检索结果去重，只显示前20条chunk
+        unique_docs = []
+        seen_contents = set()
+        for doc, score in zip(rag_output.retrieved_documents, rag_output.retriever_scores):
+            if doc.content not in seen_contents:
+                unique_docs.append((doc, score))
+                seen_contents.add(doc.content)
+            if len(unique_docs) >= 20:
+                break
+        
+        # Prepare answer
+        answer = rag_output.generated_responses[0] if rag_output.generated_responses else "Unable to generate answer"
+        
+        # 调试信息：打印prompt和语言信息
+        print(f"\n=== DEBUG INFO ===")
+        print(f"Question language: {lang}")
+        print(f"Data source: {detected_data_source}")
+        print(f"User selected data source: {datasource}")
+        print(f"Prompt template used: {rag_output.metadata.get('prompt_template', 'Unknown')}")
+        print(f"Generated response: {answer[:200]}...")  # 只打印前200个字符
+        print(f"=== END DEBUG ===\n")
+        
+        # Add reranker info to answer if used
+        if use_reranker:
+            answer = f"[Reranker: Enabled] {answer}"
+        else:
+            answer = f"[Reranker: Disabled] {answer}"
+        
+        # Prepare context data
+        context_data = []
+        for doc, score in unique_docs:
+            context_data.append([f"{score:.4f}", doc.content])
+        
+        return answer, context_data, None
     
     def launch(self, share: bool = False):
         """Launch UI interface"""

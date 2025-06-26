@@ -12,6 +12,7 @@ import torch
 import gc
 import ast
 from collections import defaultdict # <--- 确保这一行是存在的
+from torch.nn.utils import clip_grad_norm_
 
 # --- Utility Function for Context Conversion (保持不变) ---
 def convert_json_context_to_natural_language_chunks(json_str_context, company_name="公司"):
@@ -337,12 +338,38 @@ def main():
     # --- Define Loss Function ---
     train_loss = MultipleNegativesRankingLoss(model=model)
 
+    # === 增强：梯度裁剪+日志Callback ===
+    class GradientClippingAndLoggingCallback:
+        def __init__(self, model, print_every=10, max_norm=1.0):
+            self.model = model
+            self.print_every = print_every
+            self.max_norm = max_norm
+        def __call__(self, score, epoch, steps):
+            clip_grad_norm_(self.model.parameters(), self.max_norm)
+            if steps % self.print_every == 0:
+                # 获取当前学习率
+                lr = None
+                for group in self.model._first_module().optimizer.param_groups:
+                    lr = group['lr']
+                    break
+                print(f"[LOG] Epoch {epoch} Step {steps} LR {lr if lr else 'N/A'}")
+
+    gradient_clipping_logging_callback = GradientClippingAndLoggingCallback(model, print_every=10, max_norm=1.0)
+
+    # === 增强：Tokenizer一致性检查 ===
+    try:
+        model_tokenizer_name = getattr(model.tokenizer, 'name_or_path', None)
+        model_name = getattr(getattr(model._first_module(), 'auto_model', None), 'name_or_path', None)
+        if model_tokenizer_name and model_name and model_tokenizer_name != model_name:
+            print(f"[WARNING] Tokenizer({model_tokenizer_name})与模型({model_name})不一致，建议保持一致！")
+    except Exception as e:
+        print(f"[INFO] Tokenizer一致性检查跳过: {e}")
+
     # --- Fine-tune the model ---
     print(f"Starting fine-tuning for {args.num_epochs} epochs...")
     try:
-        model.fit(
+        fit_kwargs = dict(
             train_objectives=[(train_dataloader, train_loss)],
-            evaluator=evaluator,
             epochs=args.num_epochs,
             warmup_steps=int(len(train_dataloader) * args.num_epochs * 0.1),
             output_path=args.output_model_path,
@@ -350,11 +377,12 @@ def main():
             checkpoint_save_total_limit=2,
             evaluation_steps=len(train_dataloader) // 4 if len(train_dataloader) > 1 else 0,
             show_progress_bar=True,
-            optimizer_params={'lr': args.learning_rate, 'eps': 1e-6}, # 移除了 'correct_bias'
-            # fp16=True # <--- 新增此行，启用 FP16 训练
-            # save_best_model=True,
-            # measure='mrr@k'
+            optimizer_params={'lr': args.learning_rate, 'eps': 1e-6, 'weight_decay': 0.01},
+            callback=gradient_clipping_logging_callback,
         )
+        if evaluator is not None:
+            fit_kwargs['evaluator'] = evaluator
+        model.fit(**fit_kwargs)
     except Exception as e:
         print(f"An error occurred during training: {e}")
         del model

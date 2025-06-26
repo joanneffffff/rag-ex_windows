@@ -26,7 +26,7 @@ class OptimizedDataLoader:
         cache_dir: Optional[str] = None,
         chinese_document_level: bool = True,  # 中文使用文档级别
         english_chunk_level: bool = True,     # 英文保持chunk级别
-        include_eval_data: bool = True,       # 是否包含评估数据到知识库
+        include_eval_data: bool = True,       # 是否包含评估数据到知识库（默认True，包含完整知识库）
     ):
         self.data_dir = Path(data_dir)
         if cache_dir is None:
@@ -91,7 +91,7 @@ class OptimizedDataLoader:
                 self.logger.error(f"Error loading evaluation data: {str(e)}")
                 print("Warning: Could not load evaluation data, continuing with training data only")
         else:
-            print("Skipping evaluation data (not included in knowledge base for fair evaluation)")
+            print("Skipping evaluation data (only when explicitly set to False for evaluation purposes)")
         
         print(f"Final knowledge base size: {len(self.chinese_docs)} Chinese docs, {len(self.english_docs)} English docs")
     
