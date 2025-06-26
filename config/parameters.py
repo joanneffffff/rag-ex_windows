@@ -56,7 +56,7 @@ class RetrieverConfig:
     retrieval_top_k: int = 100  # FAISS检索的top-k
     rerank_top_k: int = 20      # 重排序后的top-k，从10增加到20
     # 新增参数
-    use_existing_embedding_index: bool = False  # 强制重新计算embedding，使用新的chunking逻辑
+    use_existing_embedding_index: bool = False  # 强制重新计算embedding，确保生成中文embedding
     max_alphafin_chunks: int = 1000000  # 限制AlphaFin数据chunk数量
 
 @dataclass
@@ -84,18 +84,20 @@ class SystemConfig:
 class GeneratorConfig:
     # 可选的生成器模型
     # model_name: str = "Qwen/Qwen2-1.5B-Instruct"  # 原始小模型
-    # model_name: str = "Qwen/Qwen3-8B"  # Qwen3-8B基础版本
-    # model_name: str = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"  # 金融专用R1版本
-    model_name: str = "Qwen/Qwen2-1.5B-Instruct"  # 使用更稳定的模型
+    # model_name: str = "Qwen/Qwen3-8B"  # Qwen3-8B基础版本，更大的模型
+    model_name: str = "SUFE-AIFLM-Lab/Fin-R1"  # 上海财经大学金融推理大模型，专门针对金融领域优化
     cache_dir: str = GENERATOR_CACHE_DIR
     
     # 模型特定配置
     use_quantization: bool = True  # 是否使用量化
     quantization_type: str = "8bit"  # "8bit" or "4bit"
-    max_new_tokens: int = 512  # 最大生成token数
-    temperature: float = 0.7  # 生成温度
+    max_new_tokens: int = 512  # 增加token数确保句子完整，同时保持简洁
+    temperature: float = 0.1  # 进一步降低生成温度，获得更简洁、稳定的回答
     top_p: float = 0.9  # top-p采样
     do_sample: bool = True  # 是否使用采样
+    repetition_penalty: float = 1.1  # 重复惩罚，避免重复
+    pad_token_id: int = 0  # 填充token ID
+    eos_token_id: int = 151643  # 结束token ID
 
 @dataclass
 class Config:

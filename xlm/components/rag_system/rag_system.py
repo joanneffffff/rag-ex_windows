@@ -7,7 +7,15 @@ import re
 from langdetect import detect, LangDetectException
 
 # Define the robust "Golden Prompts" directly in the code
-PROMPT_TEMPLATE_EN = """You are a professional financial analyst. Answer the following question based ONLY on the provided context. If the context does not contain the answer, clearly state "The answer cannot be found in the provided context."
+PROMPT_TEMPLATE_EN = """You are a professional financial analyst. Answer the question based on the provided context.
+
+Requirements:
+1. Use concise, direct answers
+2. Only use information from the provided context
+3. If the answer is not in the context, say "The answer cannot be found in the provided context"
+4. Do not repeat the question
+5. Do not add information outside the context
+6. Ensure complete sentences
 
 Context:
 {context}
@@ -16,13 +24,15 @@ Question: {question}
 
 Answer:"""
 
-PROMPT_TEMPLATE_ZH = """你是一个专业的金融分析师。请严格按照以下要求回答：
+PROMPT_TEMPLATE_ZH = """基于上下文信息回答问题。
 
-1. 必须用中文回答
-2. 只能基于提供的上下文信息
-3. 如果上下文中没有答案，请明确说明"在提供的上下文中找不到答案"
-4. 回答要简洁、准确、专业
-5. 不要添加任何上下文之外的信息
+要求：
+1. 用中文回答
+2. 只基于提供的上下文信息
+3. 如果上下文中没有答案，直接说"在提供的上下文中找不到答案"
+4. 回答要简洁、直接，不超过2-3句话
+5. 不要重复问题内容
+6. 不要添加上下文之外的信息
 
 上下文:
 {context}

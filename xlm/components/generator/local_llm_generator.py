@@ -156,10 +156,10 @@ class LocalLLMGenerator(Generator):
                 outputs = self.model.generate(
                     input_ids,
                     attention_mask=attention_mask,
-                    max_new_tokens=100,  # 减少生成长度，提高质量
+                    max_new_tokens=self.max_new_tokens,  # 使用配置文件中的值
                     do_sample=True,
-                    top_p=0.9,
-                    temperature=0.7,  # 稍微提高温度
+                    top_p=self.top_p,
+                    temperature=self.temperature,
                     pad_token_id=self.tokenizer.eos_token_id,  # Use eos_token_id for padding
                     repetition_penalty=1.1,  # 添加重复惩罚
                     length_penalty=1.0  # 添加长度惩罚
