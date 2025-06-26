@@ -1,0 +1,5 @@
+nohup: ignoring input
+  File "/users/sgjfei3/rag-ex_windows/finetune_chinese_encoder.py", line 59
+    chunk_text = f"一份发布日期为 {report_date} 的研究报告，其标题是："{report_title_main}"{company_info}。报告摘要内容：{report_content_preview.rstrip('...') if report_content_preview.endswith('...') else report_content_preview}。"
+                                                     ^
+SyntaxError: invalid syntax

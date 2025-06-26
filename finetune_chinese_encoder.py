@@ -347,11 +347,15 @@ def main():
         def __call__(self, score, epoch, steps):
             clip_grad_norm_(self.model.parameters(), self.max_norm)
             if steps % self.print_every == 0:
-                # 获取当前学习率
+                # 安全地尝试获取学习率
                 lr = None
-                for group in self.model._first_module().optimizer.param_groups:
-                    lr = group['lr']
-                    break
+                try:
+                    if hasattr(self.model, 'optimizer') and self.model.optimizer:
+                        for group in self.model.optimizer.param_groups:
+                            lr = group['lr']
+                            break
+                except Exception:
+                    pass
                 print(f"[LOG] Epoch {epoch} Step {steps} LR {lr if lr else 'N/A'}")
 
     gradient_clipping_logging_callback = GradientClippingAndLoggingCallback(model, print_every=10, max_norm=1.0)

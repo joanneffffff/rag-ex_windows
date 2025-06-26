@@ -222,8 +222,12 @@ def test_retrieval_with_eval_context(include_eval_data: bool = True):
         config = Config()
         
         print("1. 加载编码器...")
+        # encoder_ch = FinbertEncoder(
+        #     model_name="models/finetuned_alphafin_zh",
+        #     cache_dir=config.encoder.cache_dir,
+        # )
         encoder_ch = FinbertEncoder(
-            model_name="models/finetuned_alphafin_zh",
+            model_name="./models/finetuned_alphafin_zh_optimized",
             cache_dir=config.encoder.cache_dir,
         )
         encoder_en = FinbertEncoder(
@@ -538,8 +542,12 @@ def evaluate_retrieval_quality(include_eval_data=True, max_eval_samples=None):
         config = Config()
         
         print("\n1. 加载编码器...")
+        # encoder_ch = FinbertEncoder(
+        #     model_name="models/finetuned_alphafin_zh",
+        #     cache_dir=config.encoder.cache_dir,
+        # )
         encoder_ch = FinbertEncoder(
-            model_name="models/finetuned_alphafin_zh",
+            model_name="./models/finetuned_alphafin_zh_optimized",
             cache_dir=config.encoder.cache_dir,
         )
         encoder_en = FinbertEncoder(
