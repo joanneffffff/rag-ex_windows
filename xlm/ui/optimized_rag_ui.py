@@ -21,6 +21,10 @@ def try_load_qwen_reranker(model_name, cache_dir=None):
     """
     优先尝试量化加载QwenReranker，失败则自动回退为非量化。
     """
+    # 确保cache_dir是有效的字符串
+    if cache_dir is None:
+        cache_dir = RERANKER_CACHE_DIR
+    
     try:
         import bitsandbytes as bnb
         if torch.cuda.is_available():
@@ -57,12 +61,12 @@ class OptimizedRagUI:
         encoder_model_name: str = "paraphrase-multilingual-MiniLM-L12-v2",
         # generator_model_name: str = "facebook/opt-125m",
         generator_model_name: str = "Qwen/Qwen2-1.5B-Instruct",
-        cache_dir: str = None,
+        cache_dir: Optional[str] = None,
         data_path: str = "data/rise_of_ai.txt",
         use_faiss: bool = True,
         enable_reranker: bool = True,
-        use_existing_embedding_index: bool = None,  # 从config读取，None表示使用默认值
-        max_alphafin_chunks: int = None,  # 从config读取，None表示使用默认值
+        use_existing_embedding_index: Optional[bool] = None,  # 从config读取，None表示使用默认值
+        max_alphafin_chunks: Optional[int] = None,  # 从config读取，None表示使用默认值
         window_title: str = "RAG System with FAISS",
         title: str = "RAG System with FAISS",
         examples: Optional[List[List[str]]] = None,
@@ -213,48 +217,44 @@ class OptimizedRagUI:
                 all_embeddings = np.vstack([embeddings_en, embeddings_ch])
                 self.dimension = all_embeddings.shape[1]
                 self.index = faiss.IndexFlatL2(self.dimension)
-                self.index.add(all_embeddings.astype('float32'))
+                # 确保数据类型正确
+                embeddings_float32 = all_embeddings.astype('float32')
+                self.index.add(embeddings_float32)
                 print(f"Step 3.1. Initializing FAISS index with {all_embeddings.shape[0]} embeddings...")
             else:
                 print("Warning: No embeddings available for FAISS initialization")
         else:
-            # 单空间检索器
-            corpus_embeddings = self.retriever.corpus_embeddings
-            self.dimension = len(corpus_embeddings[0])
-            self.index = faiss.IndexFlatL2(self.dimension)
-            self.index.add(np.array(corpus_embeddings).astype('float32'))
+            # 单空间检索器 - 对于BilingualRetriever，跳过FAISS初始化
+            print("Warning: BilingualRetriever detected, skipping FAISS initialization")
+            print("FAISS index will not be available for this retriever type")
     
     def _create_interface(self) -> gr.Blocks:
         """Create optimized Gradio interface"""
         with gr.Blocks(
-            theme=gr.themes.Monochrome().set(
-                button_primary_background_fill="#009374",
-                button_primary_background_fill_hover="#009374C4",
-                checkbox_label_background_fill_selected="#028A6EFF",
-            ),
             title=self.window_title
         ) as interface:
-            # Title and data source display
+            # 标题
+            gr.Markdown(f"# {self.title}")
+            
+            # 输入区域
             with gr.Row():
-                with gr.Column(scale=1):
-                    Markdown(
-                        f'<p style="text-align: center; font-size:200%; font-weight: bold">{self.title}</p>'
+                with gr.Column(scale=4):
+                    datasource = gr.Radio(
+                        choices=["TatQA", "AlphaFin", "Both"],
+                        value="Both",
+                        label="Data Source"
                     )
-                with gr.Column(scale=1):
-                    data_source_display = gr.Textbox(
-                        value="Auto-detect",
-                        label="Data Source",
-                        interactive=False
-                    )
-            # Input area
+                    
             with gr.Row():
-                with gr.Column(scale=1):
+                with gr.Column(scale=4):
                     question_input = gr.Textbox(
-                        placeholder="Type your question here and press Enter.",
+                        show_label=False,
+                        placeholder="Enter your question",
                         label="Question",
                         lines=3
                     )
-            # Control buttons
+            
+            # 控制按钮区域
             with gr.Row():
                 with gr.Column(scale=1):
                     reranker_checkbox = gr.Checkbox(
@@ -263,50 +263,56 @@ class OptimizedRagUI:
                         interactive=True
                     )
                 with gr.Column(scale=1):
-                    submit_btn = gr.Button(
-                        value="🔍 Ask",
-                        variant="secondary",
-                        elem_id="button"
+                    submit_btn = gr.Button("Submit")
+            
+            # 使用标签页分离显示
+            with gr.Tabs():
+                # 回答标签页
+                with gr.TabItem("Answer"):
+                    answer_output = gr.Textbox(
+                        show_label=False,
+                        interactive=False,
+                        label="Generated Response",
+                        lines=5
                     )
-            # Output area with tabs
-            with gr.Row():
-                with gr.Tabs():
-                    with gr.TabItem("Answer"):
-                        answer_output = gr.Textbox(
-                            label="Generated Response",
-                            lines=5,
-                            interactive=False
-                        )
-                    with gr.TabItem("Explanation"):
-                        context_output = gr.Dataframe(
-                            headers=["Score", "Context"],
-                            datatype=["number", "str"],
-                            label="Retrieved Contexts",
-                            interactive=False
-                        )
-            # 绑定事件
-            submit_btn.click(
-                self._process_question,
-                inputs=[question_input, reranker_checkbox],
-                outputs=[answer_output, context_output]
-            )
-            # 示例问题
+                
+                # 解释标签页
+                with gr.TabItem("Explanation"):
+                    context_output = gr.Dataframe(
+                        headers=["Score", "Context"],
+                        datatype=["number", "str"],
+                        label="Retrieved Contexts",
+                        interactive=False
+                    )
+
+            # 添加示例问题
             gr.Examples(
                 examples=self.examples,
                 inputs=[question_input],
+                label="Example Questions"
             )
+
+            # 绑定事件
+            submit_btn.click(
+                self._process_question,
+                inputs=[question_input, datasource, reranker_checkbox],
+                outputs=[answer_output, context_output]
+            )
+            
             return interface
     
     def _process_question(
         self,
         question: str,
+        datasource: str,
         reranker_checkbox: bool
     ) -> tuple[str, List[List[str]], Optional[gr.Plot]]:
         """Process user question and return results"""
         if not question.strip():
             return "Please enter a question.", [], None
         print(f"\nProcessing question: {question}")
-        print(f"Reranker enabled: {reranker_checkbox}")
+        print(f"Data source: {datasource}")
+        
         # Detect language and pass to rag_system
         try:
             from langdetect import detect
@@ -322,7 +328,10 @@ class OptimizedRagUI:
             print(f"Language detection failed: {e}, fallback to English.")
             language = 'en'
         print(f"Detected language: {language}")
-        use_reranker = reranker_checkbox and self.enable_reranker and self.reranker
+        
+        # 根据数据源选择决定是否使用重排序器
+        use_reranker = reranker_checkbox and self.enable_reranker and self.reranker is not None
+        
         try:
             rag_output = self.rag_system.run(user_input=question, language=language)
             
@@ -335,14 +344,14 @@ class OptimizedRagUI:
                 if lang == 'ko' and is_chinese(question):
                     lang = 'zh-cn'
                 is_chinese_q = lang.startswith('zh')
-                data_source = "AlphaFin" if is_chinese_q else "TAT_QA"
-                print(f"Detected language: {lang} -> Using data source: {data_source}")
+                detected_data_source = "AlphaFin" if is_chinese_q else "TAT_QA"
+                print(f"Detected language: {lang} -> Using data source: {detected_data_source}")
             except LangDetectException:
                 print("Language detection failed, defaulting to English -> TAT_QA")
-                data_source = "TAT_QA"
+                detected_data_source = "TAT_QA"
             
             # Apply reranker if enabled
-            if use_reranker and rag_output.retrieved_documents:
+            if use_reranker and rag_output.retrieved_documents and self.reranker is not None:
                 print("Applying reranker...")
                 # Prepare documents for reranking
                 docs_for_rerank = [(doc.content, doc.metadata.source) for doc in rag_output.retrieved_documents]
@@ -386,7 +395,8 @@ class OptimizedRagUI:
             # 调试信息：打印prompt和语言信息
             print(f"\n=== DEBUG INFO ===")
             print(f"Question language: {lang}")
-            print(f"Data source: {data_source}")
+            print(f"Data source: {detected_data_source}")
+            print(f"User selected data source: {datasource}")
             print(f"Prompt template used: {rag_output.metadata.get('prompt_template', 'Unknown')}")
             print(f"Generated response: {answer[:200]}...")  # 只打印前200个字符
             print(f"=== END DEBUG ===\n")

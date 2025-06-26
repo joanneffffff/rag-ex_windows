@@ -33,7 +33,7 @@ def main():
         # 导入并启动UI
         from xlm.ui.optimized_rag_ui import OptimizedRagUI
         
-        # 创建UI实例
+        # 创建UI实例，使用与run_optimized_ui_old.py相同的示例问题
         ui = OptimizedRagUI(
             cache_dir=config.cache_dir,
             use_faiss=True,
@@ -41,12 +41,12 @@ def main():
             window_title="Financial Explainable RAG System",
             title="Financial Explainable RAG System",
             examples=[
-            ["什么是股票投资？"],
-            ["请解释债券的基本概念"],
-            ["基金投资与股票投资有什么区别？"],
-            ["What is stock investment?"],
-            ["Explain the basic concepts of bonds"],
-            ["What are the differences between fund investment and stock investment?"]
+                ["What is the revenue for Q4 2019?"],
+                ["What is the operating margin in 2018?"],
+                ["What are the R&D expenses in 2019?"],
+                ["2019年第四季度利润是多少？"],
+                ["毛利率趋势分析"],
+                ["研发投入比例"]
             ]
         )
         
