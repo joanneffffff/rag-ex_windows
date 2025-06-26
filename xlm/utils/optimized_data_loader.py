@@ -24,6 +24,7 @@ class OptimizedDataLoader:
         cache_dir: Optional[str] = None,
         chinese_document_level: bool = True,  # 中文使用文档级别
         english_chunk_level: bool = True,     # 英文保持chunk级别
+        include_eval_data: bool = True,       # 是否包含评估数据到知识库
     ):
         self.data_dir = Path(data_dir)
         if cache_dir is None:
@@ -32,6 +33,7 @@ class OptimizedDataLoader:
         self.max_samples = max_samples
         self.chinese_document_level = chinese_document_level
         self.english_chunk_level = english_chunk_level
+        self.include_eval_data = include_eval_data
         
         self.logger = logging.getLogger(__name__)
         
@@ -68,6 +70,28 @@ class OptimizedDataLoader:
             self.chinese_docs = []
         
         print(f"Loaded {len(self.chinese_docs)} AlphaFin documents (Chinese)\n")
+        
+        # 根据参数决定是否添加评估数据到知识库
+        if self.include_eval_data:
+            print("Loading evaluation data to knowledge base...")
+            try:
+                # 加载中文评估数据
+                alphafin_eval_docs = self._load_eval_data("evaluate_mrr/alphafin_eval.jsonl", "chinese")
+                self.chinese_docs.extend(alphafin_eval_docs)
+                print(f"Added {len(alphafin_eval_docs)} AlphaFin evaluation documents to Chinese knowledge base")
+                
+                # 加载英文评估数据
+                tatqa_eval_docs = self._load_eval_data("evaluate_mrr/tatqa_eval.jsonl", "english")
+                self.english_docs.extend(tatqa_eval_docs)
+                print(f"Added {len(tatqa_eval_docs)} TatQA evaluation documents to English knowledge base")
+                
+            except Exception as e:
+                self.logger.error(f"Error loading evaluation data: {str(e)}")
+                print("Warning: Could not load evaluation data, continuing with training data only")
+        else:
+            print("Skipping evaluation data (not included in knowledge base for fair evaluation)")
+        
+        print(f"Final knowledge base size: {len(self.chinese_docs)} Chinese docs, {len(self.english_docs)} English docs")
     
     def _load_tatqa_data(self) -> List[DocumentWithMetadata]:
         """Load and process TatQA data - 保持原有逻辑"""
@@ -441,3 +465,127 @@ class OptimizedDataLoader:
             "chinese_max_length": max(chinese_lengths) if chinese_lengths else 0,
             "english_max_length": max(english_lengths) if english_lengths else 0,
         } 
+
+    def _load_eval_data(self, eval_file: str, language: str) -> List[DocumentWithMetadata]:
+        """Load evaluation data and convert to documents"""
+        eval_docs = []
+        
+        try:
+            eval_path = Path(eval_file)
+            if not eval_path.exists():
+                self.logger.warning(f"Evaluation file not found at {eval_path}")
+                return eval_docs
+            
+            print(f"Loading evaluation data from {eval_path}")
+            
+            # 检查文件格式
+            if eval_path.suffix == '.jsonl':
+                # 处理JSONL格式
+                eval_data = []
+                with open(eval_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            eval_data.append(json.loads(line))
+            else:
+                # 处理JSON格式
+                with open(eval_path, 'r', encoding='utf-8') as f:
+                    eval_data = json.load(f)
+            
+            print(f"Found {len(eval_data)} evaluation samples")
+            
+            for record in tqdm(eval_data, desc=f"Processing {language} evaluation data"):
+                # 处理不同的数据格式
+                if isinstance(record, dict):
+                    if 'context' in record:
+                        # 使用context作为文档内容
+                        content = record.get("context")
+                        question = record.get("question", "")
+                        metadata = {
+                            "source": f"eval_{language}",
+                            "question": question,
+                            "language": language,
+                            "eval_data": True
+                        }
+                    else:
+                        # 其他格式：尝试找到文本内容
+                        content = str(record)
+                        metadata = {"source": f"eval_{language}", "language": language, "eval_data": True}
+                else:
+                    content = str(record)
+                    metadata = {"source": f"eval_{language}", "language": language, "eval_data": True}
+                
+                if content and isinstance(content, str):
+                    # 文档级别处理：直接使用整个文档作为chunk
+                    if language == "chinese" and self.chinese_document_level:
+                        # 检查文档长度，如果太长则适当分割
+                        if len(content) > 8192:  # 8K字符限制
+                            # 按段落分割长文档
+                            paragraphs = content.split('\n\n')
+                            if len(paragraphs) > 1:
+                                # 合并段落直到达到合理长度
+                                merged_chunks = self._merge_paragraphs_to_chunks(paragraphs, max_length=8192)
+                                for i, chunk_content in enumerate(merged_chunks):
+                                    chunk_metadata = DocumentMetadata(
+                                        source=f"{metadata.get('source', 'eval_chinese')}_doc_{i}",
+                                        created_at="",
+                                        author="",
+                                        language="chinese"
+                                    )
+                                    
+                                    chunk_doc = DocumentWithMetadata(
+                                        content=chunk_content,
+                                        metadata=chunk_metadata
+                                    )
+                                    eval_docs.append(chunk_doc)
+                            else:
+                                # 单个长段落，按句子分割
+                                sentences = content.split('。')
+                                merged_chunks = self._merge_sentences_to_chunks(sentences, max_length=8192)
+                                for i, chunk_content in enumerate(merged_chunks):
+                                    chunk_metadata = DocumentMetadata(
+                                        source=f"{metadata.get('source', 'eval_chinese')}_doc_{i}",
+                                        created_at="",
+                                        author="",
+                                        language="chinese"
+                                    )
+                                    
+                                    chunk_doc = DocumentWithMetadata(
+                                        content=chunk_content,
+                                        metadata=chunk_metadata
+                                    )
+                                    eval_docs.append(chunk_doc)
+                        else:
+                            # 文档长度适中，直接使用
+                            doc_metadata = DocumentMetadata(
+                                source=metadata.get('source', 'eval_chinese'),
+                                created_at="",
+                                author="",
+                                language="chinese"
+                            )
+                            
+                            eval_doc = DocumentWithMetadata(
+                                content=content,
+                                metadata=doc_metadata
+                            )
+                            eval_docs.append(eval_doc)
+                    else:
+                        # 英文或其他语言，使用简单chunking
+                        doc_metadata = DocumentMetadata(
+                            source=metadata.get('source', f'eval_{language}'),
+                            created_at="",
+                            author="",
+                            language=language
+                        )
+                        
+                        eval_doc = DocumentWithMetadata(
+                            content=content,
+                            metadata=doc_metadata
+                        )
+                        eval_docs.append(eval_doc)
+            
+        except Exception as e:
+            self.logger.error(f"Error processing evaluation data: {str(e)}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+        
+        return eval_docs 
