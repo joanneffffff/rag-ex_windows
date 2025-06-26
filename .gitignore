@@ -68,6 +68,7 @@ ENV/
 # Logs
 *.log
 *.out
+.nfs*
 
 # Model files
 *.onnx
