@@ -1,0 +1,268 @@
+{
+  "summary": {
+    "total_samples": 10,
+    "avg_retrieval_relevance": 0.30631827807179296,
+    "avg_generation_accuracy": 0.10656746031746031,
+    "retrieval_good_rate": 0.4,
+    "generation_good_rate": 0.0,
+    "both_good_rate": 0.0,
+    "problem_distribution": {
+      "retrieval_only_good": 4,
+      "generation_only_good": 0,
+      "both_good": 0,
+      "both_bad": 6
+    }
+  },
+  "detailed_results": [
+    {
+      "question": "What method did the company use when Topic 606 in fiscal 2019 was adopted?",
+      "context": "We utilized a comprehensive approach to evaluate and document the impact of the guidance on our current accounting policies and practices in order to identify material differences, if any, that would result from applying the new requirements to our revenue contracts. We did not identify any material differences resulting from applying the new requirements to our revenue contracts. In addition, we did not identify any significant changes to our business processes, systems, and controls to support recognition and disclosure requirements under the new guidance. We adopted the provisions of Topic 606 in fiscal 2019 utilizing the modified retrospective method. We recorded a $0.5 million cumulative effect adjustment, net of tax, to the opening balance of fiscal 2019 retained earnings, a decrease to receivables of $7.6 million, an increase to inventories of $2.8 million, an increase to prepaid expenses and other current assets of $6.9 million, an increase to other accrued liabilities of $1.4 million, and an increase to other noncurrent liabilities of $0.2 million. The adjustments primarily related to the timing of recognition of certain customer charges, trade promotional expenditures, and volume discounts.",
+      "answer": "the modified retrospective method",
+      "retrieved_chunks": [
+        "The Company adopted Topic 606 at the beginning of fiscal 2019 using the modified retrospective method. The new standard resulted in a change to the timing of revenue recognition for a significant portion of the Company's revenue, whereby revenue is recognized over time, as products are produced, as opposed to at a point in time based upon shipping terms. As a result of the adoption of Topic 606, the following adjustments were made to the opening balances of the Company's Consolidated Balance Sheets (in",
+        "(1) On December 1, 2018, the beginning of our fiscal year 2019, we adopted the requirements of the Financial Accounting Standards Board’s Accounting Standards Update No. 2014-09, Revenue from Contracts with Customers, Topic 606, utilizing the modified retrospective method of transition. Prior period information has not been restated and continues to be reported under the accounting standard in effect for those periods.",
+        "On January 1, 2018, we adopted Topic 606, ASU 2018-02, Income Statement-Reporting Comprehensive Income and other ASUs. We adopted Topic 606 using the modified retrospective method. We early adopted ASU 2018-02, which allows a reclassification from accumulated other comprehensive income to retained earnings for stranded tax effects resulting from Tax Cuts and Jobs Act (TCJA).",
+        "The Company adopted ASC 606 effective January 1, 2018 using the modified retrospective method. The Company recognized the cumulative effect of initially applying ASC 606, which was immaterial, as an adjustment to the opening balance of retained earnings. The comparative prior period information is accounted for in accordance with the previous revenue guidance, ASC 605, and has not been restated. In accordance with ASC 606, the Company recognizes revenue under the core principle to depict the transfer of",
+        "The amounts as of and for the years ended December 31, 2019 and 2018 have been prepared based on our adoption of Accounting Standards Codification (‘‘ASC’’) No. 606, Contracts with Customers. We elected to adopt this accounting standard on a modified retrospective basis which resulted in the impact of adoption being recorded as of January 1, 2018. The amounts in all other years, other than 2019 and 2018, in the tables below have been prepared on the previously outstanding guidance on revenue recognition. We"
+      ],
+      "retrieved_scores": [
+        1.0,
+        1.0,
+        1.0,
+        0.9995,
+        0.999
+      ],
+      "generated_answer": "[Reranker: Enabled] a cumulative-effect adjustment to retained earnings of $1,149,000.\n\nThe Company adopted ASC 606 effective January 1, 2018 using the modified retrospective method. The Company recognized the cumulative effect of initially applying ASC 606, which was immaterial, as an adjustment to the opening balance of retained earnings. The comparative prior period information is accounted for in accordance with the previous revenue guidance, ASC 605, and has not been",
+      "retrieval_relevance": 0.29638002773925104,
+      "generation_accuracy": 0.0,
+      "is_retrieval_good": false,
+      "is_generation_good": false,
+      "prompt_type": "optimized"
+    },
+    {
+      "question": "How much was the cumulative-effect adjustment to the opening balance of fiscal 2019 retained earnings?",
+      "context": "We utilized a comprehensive approach to evaluate and document the impact of the guidance on our current accounting policies and practices in order to identify material differences, if any, that would result from applying the new requirements to our revenue contracts. We did not identify any material differences resulting from applying the new requirements to our revenue contracts. In addition, we did not identify any significant changes to our business processes, systems, and controls to support recognition and disclosure requirements under the new guidance. We adopted the provisions of Topic 606 in fiscal 2019 utilizing the modified retrospective method. We recorded a $0.5 million cumulative effect adjustment, net of tax, to the opening balance of fiscal 2019 retained earnings, a decrease to receivables of $7.6 million, an increase to inventories of $2.8 million, an increase to prepaid expenses and other current assets of $6.9 million, an increase to other accrued liabilities of $1.4 million, and an increase to other noncurrent liabilities of $0.2 million. The adjustments primarily related to the timing of recognition of certain customer charges, trade promotional expenditures, and volume discounts.",
+      "answer": "$0.5 million",
+      "retrieved_chunks": [
+        "During the preparation of the financial statements for the three months ended September 30, 2019, the Company identified a misstatement in previously issued financial statements. The misstatement related to an error in the measurement of the cumulative effect of the accounting change related to the Company’s January 1, 2018 adoption of Accounting Standards Update No. 2014-09, “Revenue from Contracts with Customers (Topic 606)” (“ASU 2014-09” or “Topic 606”) and impacted the January 1, 2018 opening",
+        "As of September 27, 2019, we had warrants outstanding which were reported as a liability on the consolidated balance sheet. During fiscal years 2019 and 2018, we recorded gains of $0.8 million and $27.6 million, respectively, associated with adjusting the fair value of the warrants, in the Consolidated Statements of Operations primarily as a result of declines in our stock price.",
+        "In 2018, we recorded a $0.5 million adjustment to decrease the fair value of the Company's contingent consideration related to the Brink Acquisition. Also, during 2019 and 2018, the Company incurred a net loss on rental contracts of approximately $1.0 million and $0.9 million, respectively.",
+        "During the Company's second quarter of fiscal 2019 and second quarter of fiscal 2018, we recorded $2.3 million and $80.8 million, respectively, primarily related to the legal settlement of several antitrust claims against the Company. Also during the second quarter of fiscal 2018, the Tax Cuts and Jobs Act of 2017 was enacted. This resulted in an initial revaluation of our deferred tax liabilities during the third quarter which favorably impacted our results by $35.0 million. In the fourth quarter of fiscal",
+        "fiscal 2019 and it did not have a material impact on our consolidated financial statements."
+      ],
+      "retrieved_scores": [
+        0.8364,
+        0.1422,
+        0.0857,
+        0.0748,
+        0.028
+      ],
+      "generated_answer": "[Reranker: Enabled] the termination of the plans was due to a reduction in workforce caused by strategic initiatives implemented by the Company. We also recognize an expense for severance benefits under the plan freeze for each employee terminated as a result of the termination of the plans. During fiscal 2017, we had a total of 1,387 employees participating in the plans. During the first quarter of fiscal 2019, we froze our qualified defined benefit plans. This action did not have a material",
+      "retrieval_relevance": 0.21689320388349512,
+      "generation_accuracy": 0.0,
+      "is_retrieval_good": false,
+      "is_generation_good": false,
+      "prompt_type": "optimized"
+    },
+    {
+      "question": "What does the table show?",
+      "context": "The primary components of the deferred tax assets and liabilities are as follows, for the periods indicated below:",
+      "answer": "primary components of the deferred tax assets and liabilities",
+      "retrieved_chunks": [
+        "The table below shows how our (loss)/profit for the year from continuing operations translates into cash flows generated from our operating activities.",
+        "The table below shows non-current assets excluding financial instruments, deferred tax assets, post-employment benefit assets, and rights arising under insurance contracts.",
+        "The table below sets forth for the fiscal years ended April 30, 2019 and 2018, the percentage of consolidated net sales represented by certain items in the Company’s consolidated statements of operations:",
+        "The following table shows for the fiscal year ended March 29, 2019, certain information regarding option exercises and stock vested during the last fiscal year with respect to our named executive officers:",
+        "The table below sets forth information concerning the number of shares acquired on exercise of option awards and vesting of stock awards in 2019 and the value realized upon vesting by such officers."
+      ],
+      "retrieved_scores": [
+        0.998,
+        0.9941,
+        0.8682,
+        0.8345,
+        0.772
+      ],
+      "generated_answer": "[Reranker: Enabled] ) The table shows information about non-current assets, including the breakdown by category, and cash flows generated from operating activities. It also includes details about option exercises and stock vesting, information about PSU awards, SLO awards, and restricted stock awards, changes in accumulated other comprehensive income, changes in the fair market value of available-for-sale securities, and unaudited pro forma financial information.\n\nThe answer cannot be found in the provided context.",
+      "retrieval_relevance": 0.30374999999999996,
+      "generation_accuracy": 0.2222222222222222,
+      "is_retrieval_good": true,
+      "is_generation_good": false,
+      "prompt_type": "optimized"
+    },
+    {
+      "question": "What costs are associated under capital expenditure?",
+      "context": "Capital expenditures include costs associated with acquiring property, plant and equipment and placing it into service. The telecommunications business requires extensive and continual investments, including investment in new technologies and the expansion of capacity and geographical reach. Expenditures related to the acquisition of spectrum licences and additions to right-of-use assets are not included in capital expenditures and do not factor into the calculation of free cash flow or capital intensity. See “Managing Our Liquidity and Financial Resources”, “Key Performance Indicators”, and “Non-GAAP Measures and Related Performance Measures” for more information.",
+      "answer": "associated with acquiring property, plant and equipment and placing it into service",
+      "retrieved_chunks": [
+        "For the years ended June 30, 2019, 2018 and 2017, interest costs totaled $31.1 million, $31.1 million and $31.1 million, respectively, of which $5.1 million, $2.8 million and $1.3 million, respectively, were capitalized as part of the cost of property, plant, equipment and software.",
+        "Interest expense increased $5.3 million primarily as a result of interest expense of $3.3 million associated with our long-term debt and our financing lease obligation of $2.0 million in connection with the construction of our Lexington, MA – U.S. headquarters.",
+        "Interest expense, including administrative and other fees, was $25,633 for 2019 compared with $30,890 in 2018. The decrease in interest expense was primarily associated with the impact of the refinancing of our term loan at the end of 2018 and interest capitalized during 2019 due to vessels under construction.",
+        "In 2018/19, the Group recognised an expense of £2.1m (2017/18: £2.8m), related to all equity-settled share-based payment transactions.",
+        "Operating (non-GAAP) interest expense increased $393 million compared to the prior-year period. It excludes the Red Hat pre-closing debt financing costs."
+      ],
+      "retrieved_scores": [
+        0.7007,
+        0.0365,
+        0.0173,
+        0.0055,
+        0.0049
+      ],
+      "generated_answer": "[Reranker: Enabled] fees.\n\nInterest expense, net includes the stated interest rate on our outstanding debt, as well as the net impact of capitalized interest, interest income, the effects of terminated interest rate swaps and the amortization of capitalized senior debt issuance costs and credit facility fees.\n\nInterest expense, net includes the stated interest rate on our outstanding debt, as well as the net impact of capitalized interest, interest income, the effects of terminated interest rate swaps and the amortization of capitalized senior debt issuance costs and credit facility fees.",
+      "retrieval_relevance": 0.11808102345415776,
+      "generation_accuracy": 0.0,
+      "is_retrieval_good": false,
+      "is_generation_good": false,
+      "prompt_type": "optimized"
+    },
+    {
+      "question": "What caused the increase in capital expenditures related to wireless?",
+      "context": "WIRELESS The increase in capital expenditures in Wireless this year was a result of investments made to upgrade our wireless network to continue delivering reliable performance for our customers. We continued augmenting our existing LTE network with 4.5G technology investments that are also 5G-ready to prepare for the commercial launch of 5G in select markets in early 2020. In 2019, we acquired spectrum licences for $1,731 million, which is not included in the table above. See “Managing Our Liquidity and Financial Resources”.",
+      "answer": "result of investments made to upgrade our wireless network to continue delivering reliable performance for our customers.",
+      "retrieved_chunks": [
+        "Our capital expenditure program includes, among other things, restaurant remodeling, information technology enhancements, and investments in new locations and equipment. In 2019, capital expenditures increased by $9.8 million primarily due to an increase of $16.2 million in purchases of assets intended for sale or sale and leaseback, partially offset by a $8.7 million decrease in restaurant capital maintenance and facility improvement spending mainly from a decrease in the average number of company-operated",
+        "The $29.3 million increase in our cost of license and subscription revenue was primarily attributable to increases of $14.9 million in personnel expenses, $8.6 million in cloud infrastructure costs incurred in order to support the growth of our subscription offerings, $3.3 million in royalties, $1.8 million in professional services, and $0.9 million related to the amortization of internal-use software development and acquired intangible assets.",
+        "Cost of revenue increased $4.9 million, or 3%, in 2019 as compared to 2018. The increase in cost of revenue was primarily due to $12.1 million in increased personnel expenses, stock-based compensation, and overhead costs, $3.9 million in increased content costs, $3.6 million in increased amortization of acquired intangible assets, and $1.6 million in increased capitalized software amortization. These increased costs were partially offset by $16.4 million in decreased external implementation professional",
+        "Subscription cost of revenues and gross margin. Cost of subscriptions revenues increased by $50.9 million, or 46%, during fiscal year 2019 as compared to fiscal year 2018. Primary drivers of the increase were increases in third-party costs to support our solution offerings of $21.5 million, infrastructure support costs of $19.8 million including amortization expense from acquired intangible assets, and headcount and personnel and contractor related costs of $9.6 million including share-based compensation",
+        "Sales and marketing expenses increased $80 million, or 38%, in 2018 compared to 2017. The overall increase was primarily due to increased employee compensation-related costs, including amortization of capitalized commissions, of $55 million, driven by headcount growth, and an increase in marketing program costs of $10 million. The increase in marketing program costs was driven by increased volume of advertising activities. Further contributing to the overall increase was an increase in allocated shared"
+      ],
+      "retrieved_scores": [
+        0.9326,
+        0.1166,
+        0.0786,
+        0.0239,
+        0.0145
+      ],
+      "generated_answer": "[Reranker: Enabled] the expansion of our global sales team and increased focus on selling our solutions directly to enterprise customers.\n\nSales and marketing expenses increased $56 million, or 29%, in 2018 compared to 2017. The overall increase was primarily due to increased employee compensation-related costs, including amortization of capitalized commissions, of $40 million, driven by the expansion of our global sales team and increased focus on selling our solutions directly to enterprise customers.\nBased on the above context",
+      "retrieval_relevance": 0.27666666666666667,
+      "generation_accuracy": 0.13333333333333333,
+      "is_retrieval_good": false,
+      "is_generation_good": false,
+      "prompt_type": "optimized"
+    },
+    {
+      "question": "What caused the decrease in capital expenditure in cable in 2019?",
+      "context": "CABLE The decrease in capital expenditures in Cable this year was a result of lower purchases of customer premise equipment and lower investments related to the initial launch of Ignite TV. We have continued upgrading our network infrastructure with additional fibre deployments, including increasing our fibre-to-the-home and fibre-to-the-curb distribution. These upgrades will lower the number of homes passed per node and incorporate the latest technologies to help deliver more bandwidth and an even more reliable customer experience as we progress in our Connected Home roadmap.",
+      "answer": "result of lower purchases of customer premise equipment and lower investments related to the initial launch of Ignite TV.",
+      "retrieved_chunks": [
+        "Fiscal 2019 fourth-quarter acquisitions of property, plant and equipment decreased by 10.6% (11.2% in constant currency) mainly due to lower capital expenditures in the Canadian and American broadband services segments. Fiscal 2019 fourth-quarter capital intensity reached 24.9% compared to 28.7% for the same period of the prior year mainly as a result of lower capital capital expenditures combined with higher revenue.",
+        "Bell Wireline operating costs were essentially stable year over year, decreasing by 0.1% in 2019, compared to 2018, resulting from: • The favourable impact from the adoption of IFRS 16 in 2019 • Continued effective cost containment • Lower pension expenses reflecting reduced DB costs",
+        "t of transition to IFRS 16, £11.7m relates to new leases entered into in 2019 and £1.1m from acquisitions. Capital additions split between the UK and rest of the world are UK £36.8m (2018: £20.1m) and rest of the world £143.1m (2018: £32.4m).",
+        "Mobile spectrum capex of $352.4m in FY19 reflects the payment during the year of the second instalment for the Australian 700MHz spectrum acquired at auction in April 2017. The first instalment of $597.3m was paid in FY18 and the third and final instalment of $352.4m is payable in January 2020. A further $86.1m of capex was also incurred in FY19 in relation to the Australian mobile network rollout up until the project ceased. This expenditure on spectrum and mobile assets in Australia was partly impaired as",
+        "For 2019, Compensation NAV did not meet the hurdle rate, and declined by 26.1%, resulting primarily from external events that occurred in the fourth quarter at our Insurance segment, with respect to our views on the future of the management fee agreement, along with our expectations of future dividends, after recent and ongoing discussions with our domestic regulator."
+      ],
+      "retrieved_scores": [
+        0.9995,
+        0.9932,
+        0.9614,
+        0.8911,
+        0.212
+      ],
+      "generated_answer": "[Reranker: Enabled] due primarily to the last three earnout milestones, which are nonfinancial, being more difficult to complete within the required timeframe than initially assessed. During the year\nThe answer cannot be found in the provided context.",
+      "retrieval_relevance": 0.21177083333333332,
+      "generation_accuracy": 0.0625,
+      "is_retrieval_good": false,
+      "is_generation_good": false,
+      "prompt_type": "optimized"
+    },
+    {
+      "question": "Why have RSUs been omitted when calculating diluted earnings per share for 2018 and 2017?",
+      "context": "When calculating diluted earnings per share for 2018 and 2017, RSUs have been omitted as they are out-of-the-money and thus anti-dilutive, but the RSUs may potentially dilute earnings per share in the future. Please refer to note 3 for information on the RSU share options.",
+      "answer": "RSUs have been omitted as they are out-of-the-money and thus anti-dilutive",
+      "retrieved_chunks": [
+        "In 2019, 2018 and 2017, approximately 42,000, 17,000 and 40,000, respectively, of our RSUs were not included in the diluted EPS calculations because their inclusion would have been anti-dilutive. These share-based awards could be dilutive in the future. In the year ended December 31, 2019, certain potential outstanding shares from convertible senior notes and warrants were not included in the diluted EPS calculations because their inclusion would have been anti-dilutive.",
+        "In calculating the diluted earnings per share, share options outstanding and other potential shares have been taken into account where the impact of these is dilutive. Options over 36m shares (2017/18: 23m shares, 2016/17: 27m shares) were excluded from the calculation of the total diluted number of shares as the impact of these is antidilutive.",
+        "Our calculation of diluted (loss) earnings per common share excludes shares of common stock that are issuable upon exercise of stock options when the exercise price is greater than the average market price of our common stock. We also exclude unvested restricted stock awards that are antidilutive as a result of unrecognized compensation cost. Such shares were 6.8 million, 2.7 million and 4.7 million for 2019, 2018 and 2017, respectively.",
+        "As of and for the years ended December 31, 2019, 2018 and 2017, there were 0.627, 0.724 and 0.478 outstanding stock options, respectively, that were not included in the determination of diluted earnings per share because doing so would have been antidilutive.",
+        "* For the twelve months ended December 31, 2018, the diluted earnings per common share included the weighted average effect of 215,196 unvested Restricted Stock Units and 716,661 stock options that are potentially dilutive to earnings per share since the exercise price of such securities was less than the average market price during the period. For the twelve months ended December 31, 2017, the diluted earnings per common share included 438,712 unvested Restricted Stock Units and the weighted average effect"
+      ],
+      "retrieved_scores": [
+        1.0,
+        0.9995,
+        0.9995,
+        0.9995,
+        0.9995
+      ],
+      "generated_answer": "[Reranker: Enabled] the weighted average effect of 64,664 unvested Restricted Stock Units and 1,222,505 stock options that are potentially dilutive to earnings per share since the exercise price of such securities was less than the average market price during the period.\nWhat is the company's policy on excluding shares from the calculation of diluted earnings per share?\nThe company's policy on excluding shares from the calculation of diluted earnings per share is to exclude shares that have an anti-d",
+      "retrieval_relevance": 0.4380512820512821,
+      "generation_accuracy": 0.16666666666666666,
+      "is_retrieval_good": true,
+      "is_generation_good": false,
+      "prompt_type": "optimized"
+    },
+    {
+      "question": "What information does note 3 provide?",
+      "context": "When calculating diluted earnings per share for 2018 and 2017, RSUs have been omitted as they are out-of-the-money and thus anti-dilutive, but the RSUs may potentially dilute earnings per share in the future. Please refer to note 3 for information on the RSU share options.",
+      "answer": "information on the RSU share options",
+      "retrieved_chunks": [
+        "ature. Refer to Note 3 for additional information.",
+        "Reclassifications related to gains and losses on available-for-sale debt securities are included in \"Interest and other expense, net\". Refer to Note 3, \"Financial Instruments\" for the amount and location of reclassifications related to derivative instruments. Reclassifications of the defined benefit pension components of net periodic benefit cost are included in \"Interest and other expense, net\". Refer to Note 15, \"Retirement Benefit Plans.\"",
+        "Subsidiary undertakings are disclosed within note 35 to the consolidated financial statements.",
+        "(1) The consolidated balance sheet and statement of operations for the year ended December 31, 2019, includes the acquisition of Speedpay as discussed in Note 3, Acquisition, to our Notes to Consolidated Financial Statements in Part IV, Item 15 of this Form 10-K.",
+        "Please refer to the Report on Directors’ remuneration on pages 77 to 101 and note 38 of Notes to the consolidated financial statements on page 161 for disclosures relating to the emoluments, share incentives and long-term incentive interests and pensions of the Directors."
+      ],
+      "retrieved_scores": [
+        0.9995,
+        0.979,
+        0.9692,
+        0.958,
+        0.8716
+      ],
+      "generated_answer": "[Reranker: Enabled] company's financial position and its activities during the period. It also provides information about the company's management structure and its policies and procedures. Additionally, it includes information about the company's financial statements, such as the income statement, balance sheet, and cash flow statement. Finally, it contains information about the company's subsidiaries, third-party financings, and financial instruments.",
+      "retrieval_relevance": 0.23358974358974355,
+      "generation_accuracy": 0.16666666666666666,
+      "is_retrieval_good": false,
+      "is_generation_good": false,
+      "prompt_type": "optimized"
+    },
+    {
+      "question": "Which periods are state income tax returns subject to examination?",
+      "context": "The Company is subject to US federal income tax as well as to income tax in multiple state and foreign jurisdictions, including the UK. Federal income tax returns of the Company are subject to IRS examination for the 2016 through 2019 tax years. State income tax returns are subject to examination for the 2015 through 2019 tax years.",
+      "answer": "2015 through 2019 tax years.",
+      "retrieved_chunks": [
+        "0 and we are no longer subject to audit for those periods. Our U.S. state income tax returns, with some exceptions, have been examined for all years prior to fiscal 2007 and we are no longer subject to audit for those periods.",
+        "We are subject to income taxes in the U.S., various state and foreign jurisdictions. Tax statutes and regulations within each jurisdiction are subject to interpretation and require significant judgment to apply. We are no longer subject to U.S. federal or non-U.S. income tax examinations by tax authorities for the years before 2015. We are no longer subject to U.S. state tax examinations by tax authorities for the years before 2014. We believe it is reasonably possible that within the next year our",
+        "r 31, 2019 and 2018. We conduct business globally and, as a result, files income tax returns in the United State federal jurisdiction and in many state and foreign jurisdictions. We are generally no longer subject to U.S. federal, state, and local, or non-US income tax examinations for the years before 2012. Due to the expiration of statutes of limitations in multiple jurisdictions globally during 2020, the Company anticipates it is reasonably possible that unrecognized tax benefits may decrease by $3.1",
+        "The Company files income tax returns in the United States and various states and foreign jurisdictions and is subject to examination by various taxing authorities including major jurisdiction like the United States. As such, all its net operating loss and research credit carryforwards that may be used in future years are subject to adjustment, if and when utilized.",
+        "The Company operates in multiple jurisdictions throughout the world and the income tax returns of its subsidiaries in various jurisdictions are subject to periodic examination by the tax authorities. The Company regularly assesses the status of these  examinations and the various outcomes to determine the adequacy of its provision for income taxes. The amount of gross unrecognized tax benefits totaled $3.1 million and $1.4 million at April 27, 2019 and April 28, 2018, respectively. These amounts represent"
+      ],
+      "retrieved_scores": [
+        0.9995,
+        0.9922,
+        0.9854,
+        0.9834,
+        0.8447
+      ],
+      "generated_answer": "[Reranker: Enabled] vested in foreign operations, state taxes, the U.S. research and development tax cr edit, settlements with tax authorities, the tax effects of stock-based compensation and the U.S. domestic\n\nThe Company conducts business globally and, as a result, files income tax returns in the United State federal jurisdiction and in many state and foreign jurisdictions. We are generally no longer subject to U.S. federal, state, and local, or non-US income tax examinations for the years before 2012",
+      "retrieval_relevance": 0.5879999999999999,
+      "generation_accuracy": 0.1,
+      "is_retrieval_good": true,
+      "is_generation_good": false,
+      "prompt_type": "optimized"
+    },
+    {
+      "question": "What do the provisions for uncertain tax positions relate to?",
+      "context": "The provision for uncertain tax positions relates to business in territories outside of the US.",
+      "answer": "business in territories outside of the US",
+      "retrieved_chunks": [
+        "(2) At March 31, 2019, we had a $1.1 million liability reserve for unrecognized income tax positions which is not reflected in the table above. The timing of potential cash outflows related to the unrecognized tax positions is not reasonably determinable and therefore, is not scheduled. Substantially all of this reserve is included in Other non-current liabilities. Additional information regarding unrecognized tax positions is provided in Note 10, Income Taxes.",
+        "(f) We have excluded long-term tax contingencies, other tax liabilities, and deferred income taxes of $14.2 billion from the amounts presented as the timing of these obligations is uncertain. We have also excluded unearned revenue and non-cash items.",
+        "ssets and foreign tax credits, due to uncertainty about the future realization of these assets.",
+        "to be essentially permanent in nature, we do not provide for taxes on currency translation adjustments arising from converting an investment denominated in a foreign currency to U.S. dollars. When we determine that a foreign investment, as well as undistributed earnings, are no longer permanent in nature, estimated taxes will be provided for the related deferred tax liability (asset), if any, resulting from currency translation adjustments.",
+        "We provide for taxes on the undistributed earnings of foreign subsidiaries. We do not provide for taxes on other outside basis temporary differences of foreign subsidiaries as they are considered indefinitely reinvested outside the U.S. At May 31, 2019, the amount of temporary differences related to other outside basis temporary differences of investments in foreign subsidiaries upon which U.S. income taxes have not been provided was approximately $7.9 billion. If the other outside basis differences were"
+      ],
+      "retrieved_scores": [
+        0.9873,
+        0.6372,
+        0.1357,
+        0.132,
+        0.0939
+      ],
+      "generated_answer": "[Reranker: Enabled] We believe these non-GAAP measures aid investors by providing additional insight into our operational performance and help clarify trends affecting our business. For comparability of reporting, management considers non-GAAP measures in conjunction with GAAP financial results in evaluating\n\nNon-GAAP operating income, net income, and diluted EPS are non-GAAP financial measures which exclude the net tax impact of transfer of intangible properties, the net tax impact of the TCJA, and restructuring expenses. We believe these non-GAAP measures aid investors",
+      "retrieval_relevance": 0.38,
+      "generation_accuracy": 0.21428571428571427,
+      "is_retrieval_good": true,
+      "is_generation_good": false,
+      "prompt_type": "optimized"
+    }
+  ]
+}

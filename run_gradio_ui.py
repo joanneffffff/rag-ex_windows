@@ -34,9 +34,9 @@ def main():
         cache_dir = Config().cache_dir
         ui = OptimizedRagUI(
             encoder_model_name="paraphrase-multilingual-MiniLM-L12-v2",
-            generator_model_name="Qwen/Qwen2-1.5B-Instruct",  # 使用Qwen2-1.5B
+            # generator_model_name 现在从config中读取
             cache_dir=cache_dir,
-            data_path="evaluate_mrr/alphafin_train_qc.jsonl",  # 使用QCA格式数据
+            # data_path 现在从config中读取
             use_faiss=True,
             enable_reranker=True,  # 启用reranker (将使用Qwen3-0.6B)
             window_title="Enhanced RAG Financial System",

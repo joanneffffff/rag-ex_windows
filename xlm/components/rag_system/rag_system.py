@@ -7,7 +7,7 @@ import re
 from langdetect import detect, LangDetectException
 
 # Define the robust "Golden Prompts" directly in the code
-PROMPT_TEMPLATE_EN = """You are a professional financial analyst. Answer the following question in English based only on the provided context. If the context does not contain the answer, state that the answer cannot be found in the provided context.
+PROMPT_TEMPLATE_EN = """You are a professional financial analyst. Answer the following question based ONLY on the provided context. If the context does not contain the answer, clearly state "The answer cannot be found in the provided context."
 
 Context:
 {context}
@@ -22,13 +22,14 @@ PROMPT_TEMPLATE_ZH = """你是一个专业的金融分析师。请严格按照�
 2. 只能基于提供的上下文信息
 3. 如果上下文中没有答案，请明确说明"在提供的上下文中找不到答案"
 4. 回答要简洁、准确、专业
+5. 不要添加任何上下文之外的信息
 
 上下文:
 {context}
 
 问题: {question}
 
-请用中文回答:"""
+回答:"""
 
 
 class RagSystem:
@@ -90,9 +91,9 @@ class RagSystem:
         retriever_model_name = ""
         if hasattr(self.retriever, 'encoder_en') and hasattr(self.retriever, 'encoder_ch'):
             if is_chinese_q:
-                retriever_model_name = self.retriever.encoder_ch.model.name_or_path
+                retriever_model_name = getattr(self.retriever.encoder_ch, 'model_name', 'unknown')
             else:
-                retriever_model_name = self.retriever.encoder_en.model.name_or_path
+                retriever_model_name = getattr(self.retriever.encoder_en, 'model_name', 'unknown')
 
         return RagOutput(
             retrieved_documents=retrieved_documents,

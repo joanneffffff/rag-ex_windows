@@ -18,41 +18,81 @@ from xlm.dto.dto import DocumentWithMetadata, DocumentMetadata
 from config.parameters import Config, EncoderConfig, RetrieverConfig, ModalityConfig, EMBEDDING_CACHE_DIR, RERANKER_CACHE_DIR
 
 def try_load_qwen_reranker(model_name, cache_dir=None):
-    """
-    优先尝试量化加载QwenReranker，失败则自动回退为非量化。
-    """
-    # 确保cache_dir是有效的字符串
-    if cache_dir is None:
-        cache_dir = RERANKER_CACHE_DIR
-    
+    """尝试加载Qwen重排序器，支持GPU 0和CPU回退"""
     try:
-        import bitsandbytes as bnb
-        if torch.cuda.is_available():
-            print("尝试使用8bit量化加载QwenReranker...")
-            reranker = QwenReranker(
-                model_name=model_name,
-                device="cuda",
+        import torch
+        from transformers import AutoTokenizer, AutoModelForSequenceClassification
+        
+        # 确保cache_dir是有效的字符串
+        if cache_dir is None:
+            cache_dir = RERANKER_CACHE_DIR
+        
+        print(f"尝试使用8bit量化加载QwenReranker...")
+        print(f"加载重排序器模型: {model_name}")
+        
+        # 首先尝试GPU 0
+        if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+            device = "cuda:0"  # 明确指定GPU 0
+            print(f"- 设备: {device}")
+            print(f"- 缓存目录: {cache_dir}")
+            print(f"- 量化: True (8bit)")
+            print(f"- Flash Attention: False")
+            
+            try:
+                # 检查GPU 0的可用内存
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory
+                allocated_memory = torch.cuda.memory_allocated(0)
+                free_memory = gpu_memory - allocated_memory
+                
+                print(f"- GPU 0 总内存: {gpu_memory / 1024**3:.1f}GB")
+                print(f"- GPU 0 已用内存: {allocated_memory / 1024**3:.1f}GB")
+                print(f"- GPU 0 可用内存: {free_memory / 1024**3:.1f}GB")
+                
+                # 如果可用内存少于2GB，回退到CPU
+                if free_memory < 2 * 1024**3:  # 2GB
+                    print("- GPU 0 内存不足，回退到CPU")
+                    device = "cpu"
+                else:
+                    # 尝试在GPU 0上加载
+                    tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
+                    model = AutoModelForSequenceClassification.from_pretrained(
+                        model_name,
+                        cache_dir=cache_dir,
+                        torch_dtype=torch.float16,
+                        device_map="auto",
+                        load_in_8bit=True
+                    )
+                    print("量化模型已自动设置到设备，跳过手动移动")
+                    print("重排序器模型加载完成")
+                    print("量化加载成功！")
+                    return QwenReranker(model_name, device=device, cache_dir=cache_dir)
+                    
+            except Exception as e:
+                print(f"- GPU 0 加载失败: {e}")
+                print("- 回退到CPU")
+                device = "cpu"
+        
+        # CPU回退
+        if device == "cpu" or not torch.cuda.is_available():
+            device = "cpu"
+            print(f"- 设备: {device}")
+            print(f"- 缓存目录: {cache_dir}")
+            print(f"- 量化: False (CPU模式)")
+            
+            tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache_dir)
+            model = AutoModelForSequenceClassification.from_pretrained(
+                model_name,
                 cache_dir=cache_dir,
-                use_quantization=True,
-                quantization_type="8bit",
-                use_flash_attention=False
+                torch_dtype=torch.float32
             )
-            print("量化加载成功！")
-            return reranker
-        else:
-            print("未检测到CUDA，自动切换为CPU非量化加载。")
-            raise ImportError("No CUDA for quantization")
+            model = model.to(device)
+            print("重排序器模型加载完成")
+            print("CPU加载成功！")
+            return QwenReranker(model_name, device=device, cache_dir=cache_dir)
+            
     except Exception as e:
-        print(f"量化加载失败，自动回退为非量化加载。原因: {e}")
-        reranker = QwenReranker(
-            model_name=model_name,
-            device="cpu",
-            cache_dir=cache_dir,
-            use_quantization=False,
-            use_flash_attention=False
-        )
-        print("非量化加载成功。")
-        return reranker
+        print(f"加载重排序器失败: {e}")
+        return None
 
 class OptimizedRagUI:
     def __init__(
@@ -60,9 +100,9 @@ class OptimizedRagUI:
         # encoder_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         encoder_model_name: str = "paraphrase-multilingual-MiniLM-L12-v2",
         # generator_model_name: str = "facebook/opt-125m",
-        generator_model_name: str = "Qwen/Qwen2-1.5B-Instruct",
+        # generator_model_name: str = "Qwen/Qwen2-1.5B-Instruct",
+        # generator_model_name: str = "SUFE-AIFLM-Lab/Fin-R1",  # 使用金融专用Fin-R1模型
         cache_dir: Optional[str] = None,
-        data_path: str = "data/rise_of_ai.txt",
         use_faiss: bool = True,
         enable_reranker: bool = True,
         use_existing_embedding_index: Optional[bool] = None,  # 从config读取，None表示使用默认值
@@ -75,8 +115,8 @@ class OptimizedRagUI:
         config = Config()
         self.cache_dir = EMBEDDING_CACHE_DIR if (not cache_dir or not isinstance(cache_dir, str)) else cache_dir
         self.encoder_model_name = encoder_model_name
-        self.generator_model_name = generator_model_name
-        self.data_path = data_path
+        # 从config读取生成器模型名称，而不是硬编码
+        self.generator_model_name = config.generator.model_name
         self.use_faiss = use_faiss
         self.enable_reranker = enable_reranker
         # 从config读取参数，如果传入None则使用config默认值
@@ -108,37 +148,65 @@ class OptimizedRagUI:
         """Initialize RAG system components"""
         print("\nStep 1. Loading bilingual retriever with dual encoders...")
         
-        # 导入双语言数据加载器
-        from xlm.utils.dual_language_loader import DualLanguageLoader
+        # 使用config中的平台感知配置
+        config = Config()
         
-        # 加载双语言数据
-        data_loader = DualLanguageLoader()
-        chinese_docs, english_docs = data_loader.load_dual_language_data(
-            chinese_data_path="evaluate_mrr/alphafin_train_qc.jsonl",
-            english_data_path="evaluate_mrr/tatqa_train_qc.jsonl"
-        )
+        # 使用优化的数据加载器，实现文档级别chunking
+        print("\nStep 1.1. Loading data with optimized chunking...")
+        try:
+            from xlm.utils.optimized_data_loader import OptimizedDataLoader
+            
+            # 使用文档级别chunking处理中文数据
+            data_loader = OptimizedDataLoader(
+                data_dir="data",
+                max_samples=config.data.max_samples,
+                chinese_document_level=True,  # 中文使用文档级别
+                english_chunk_level=True      # 英文保持chunk级别
+            )
+            
+            # 获取处理后的文档
+            chinese_chunks = data_loader.chinese_docs
+            english_chunks = data_loader.english_docs
+            
+            # 显示统计信息
+            stats = data_loader.get_statistics()
+            print(f"✅ 文档级别chunking完成:")
+            print(f"   中文文档数: {stats['chinese_docs']}")
+            print(f"   英文文档数: {stats['english_docs']}")
+            print(f"   中文平均长度: {stats['chinese_avg_length']:.2f}")
+            print(f"   英文平均长度: {stats['english_avg_length']:.2f}")
+            
+        except Exception as e:
+            print(f"❌ 优化数据加载器失败: {e}")
+            print("回退到传统数据加载方式...")
+            
+            # 回退到传统方式
+            from xlm.utils.dual_language_loader import DualLanguageLoader
+            
+            data_loader = DualLanguageLoader()
+            chinese_docs, english_docs = data_loader.load_dual_language_data(
+                chinese_data_path=config.data.chinese_data_path,
+                english_data_path=config.data.english_data_path
+            )
+            
+            print(f"Loaded {len(chinese_docs)} Chinese documents")
+            print(f"Loaded {len(english_docs)} English documents")
+            
+            # 使用传统chunking
+            print("\nStep 1.1. Applying traditional document chunking...")
+            chinese_chunks = self._chunk_documents_advanced(chinese_docs)
+            english_chunks = self._chunk_documents_simple(english_docs, chunk_size=512, overlap=50)
+            
+            # 限制AlphaFin数据chunk数量，避免200k+ chunks影响测试
+            if len(chinese_chunks) > self.max_alphafin_chunks:
+                print(f"Limiting Chinese chunks from {len(chinese_chunks)} to {self.max_alphafin_chunks} for testing...")
+                chinese_chunks = chinese_chunks[:self.max_alphafin_chunks]
         
-        print(f"Loaded {len(chinese_docs)} Chinese documents")
-        print(f"Loaded {len(english_docs)} English documents")
-        
-        # 添加文档分块功能
-        print("\nStep 1.1. Applying document chunking...")
-        chinese_chunks = self._chunk_documents_advanced(chinese_docs)
-        english_chunks = self._chunk_documents_simple(english_docs, chunk_size=512, overlap=50)
-        
-        # 限制AlphaFin数据chunk数量，避免200k+ chunks影响测试
-        if len(chinese_chunks) > self.max_alphafin_chunks:
-            print(f"Limiting Chinese chunks from {len(chinese_chunks)} to {self.max_alphafin_chunks} for testing...")
-            chinese_chunks = chinese_chunks[:self.max_alphafin_chunks]
-        
-        print(f"After chunking: {len(chinese_chunks)} Chinese chunks, {len(english_chunks)} English chunks")
+        print(f"Final chunk count: {len(chinese_chunks)} Chinese chunks, {len(english_chunks)} English chunks")
         
         # 直接创建BilingualRetriever，embedding基于chunk
         from xlm.components.retriever.bilingual_retriever import BilingualRetriever
         from xlm.components.encoder.finbert import FinbertEncoder
-        
-        # 使用config中的正确缓存目录
-        config = Config()
         
         print("\nStep 2. Loading Chinese encoder (models/finetuned_alphafin_zh)...")
         encoder_ch = FinbertEncoder(
@@ -191,6 +259,8 @@ class OptimizedRagUI:
         self.generator = load_generator(
             generator_model_name=self.generator_model_name,
             use_local_llm=True,
+            use_gpu=True,  # 启用GPU
+            gpu_device="cuda:1",  # 使用GPU 1
             cache_dir=config.generator.cache_dir  # 使用generator的缓存目录
         )
         
@@ -199,7 +269,7 @@ class OptimizedRagUI:
         self.rag_system = RagSystem(
             retriever=self.retriever,
             generator=self.generator,
-            retriever_top_k=config.retriever.retrieval_top_k  # 从config读取retriever_top_k
+            retriever_top_k=20  # 增加到20，从config读取retriever_top_k
         )
         
         print("\nStep 7. Loading visualizer...")
@@ -380,14 +450,14 @@ class OptimizedRagUI:
                     rag_output.retrieved_documents = reranked_documents
                     rag_output.retriever_scores = reranked_scores
             
-            # 检索结果去重，只显示前5条chunk
+            # 检索结果去重，只显示前20条chunk
             unique_docs = []
             seen_contents = set()
             for doc, score in zip(rag_output.retrieved_documents, rag_output.retriever_scores):
                 if doc.content not in seen_contents:
                     unique_docs.append((doc, score))
                     seen_contents.add(doc.content)
-                if len(unique_docs) >= 5:
+                if len(unique_docs) >= 20:
                     break
             
             # Prepare answer

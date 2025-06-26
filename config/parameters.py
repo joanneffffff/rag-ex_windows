@@ -54,15 +54,18 @@ class RetrieverConfig:
     max_context_length: int = 100
     # 重排序相关配置
     retrieval_top_k: int = 100  # FAISS检索的top-k
-    rerank_top_k: int = 10      # 重排序后的top-k
+    rerank_top_k: int = 20      # 重排序后的top-k，从10增加到20
     # 新增参数
-    use_existing_embedding_index: bool = True  # 是否使用现有embedding索引
+    use_existing_embedding_index: bool = False  # 强制重新计算embedding，使用新的chunking逻辑
     max_alphafin_chunks: int = 1000000  # 限制AlphaFin数据chunk数量
 
 @dataclass
 class DataConfig:
     data_dir: str = "data"  # Unified root data directory
-    max_samples: int = 500 # Max samples to load from each dataset
+    max_samples: int = -1  # -1表示加载所有数据，500表示限制样本数
+    # 数据路径配置
+    chinese_data_path: str = "evaluate_mrr/alphafin_train_qc.jsonl"  # 中文数据路径
+    english_data_path: str = "evaluate_mrr/tatqa_train_qc.jsonl"     # 英文数据路径
 
 @dataclass
 class ModalityConfig:
@@ -79,8 +82,20 @@ class SystemConfig:
 
 @dataclass
 class GeneratorConfig:
-    model_name: str = "Qwen/Qwen2-1.5B-Instruct"
+    # 可选的生成器模型
+    # model_name: str = "Qwen/Qwen2-1.5B-Instruct"  # 原始小模型
+    # model_name: str = "Qwen/Qwen3-8B"  # Qwen3-8B基础版本
+    # model_name: str = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"  # 金融专用R1版本
+    model_name: str = "Qwen/Qwen2-1.5B-Instruct"  # 使用更稳定的模型
     cache_dir: str = GENERATOR_CACHE_DIR
+    
+    # 模型特定配置
+    use_quantization: bool = True  # 是否使用量化
+    quantization_type: str = "8bit"  # "8bit" or "4bit"
+    max_new_tokens: int = 512  # 最大生成token数
+    temperature: float = 0.7  # 生成温度
+    top_p: float = 0.9  # top-p采样
+    do_sample: bool = True  # 是否使用采样
 
 @dataclass
 class Config:

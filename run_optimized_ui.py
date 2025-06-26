@@ -41,12 +41,12 @@ def main():
             window_title="Financial Explainable RAG System",
             title="Financial Explainable RAG System",
             examples=[
-                ["What is the revenue for Q4 2019?"],
-                ["What is the operating margin in 2018?"],
-                ["What are the R&D expenses in 2019?"],
-                ["2019年第四季度利润是多少？"],
-                ["毛利率趋势分析"],
-                ["研发投入比例"]
+                ["德赛电池(000049)的下一季度收益预测如何？"],
+                ["用友网络2019年的每股经营活动产生的现金流量净额是多少？"],
+                ["下月股价能否上涨?"],
+                ["How was internally developed software capitalised?"],
+                ["Why did the Operating revenues decreased from 2018 to 2019?"],
+                ["Why did the Operating costs decreased from 2018 to 2019?"]
             ]
         )
         
