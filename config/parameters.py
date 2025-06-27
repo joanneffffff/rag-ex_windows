@@ -126,7 +126,8 @@ class Config:
         if os.getenv("PRODUCTION") == "1":
             return cls(
                 encoder=EncoderConfig(
-                    chinese_model_path="models/finetuned_alphafin_zh",
+                    # chinese_model_path="models/finetuned_alphafin_zh",
+                    chinese_model_path="models/finetuned_alphafin_zh_optimized",
                     english_model_path="models/finetuned_finbert_tatqa",
                     batch_size=64
                 ),
