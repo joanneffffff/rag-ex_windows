@@ -6,6 +6,13 @@ data/alphafin*
 data/processed*
 checkpoints/*
 checkpoints/
+
+# 然后，排除 data/ 目录本身（重要，为了能进一步排除其子目录）
+!data/
+
+# 接着，排除 data/alphafin/ 目录本身（如果 data/ 下还有其他你想忽略的子目录）
+!data/alphafin/
+
 !data/alphafin/alphafin_summarized_and_structured_qa_0627_b8_s50_fullsentence.json
 
 # Python cache
