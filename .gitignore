@@ -1,20 +1,15 @@
 # Data directory
-data/
-data/*
-data/tatqa*
-data/alphafin*
-data/processed*
 checkpoints/*
 checkpoints/
 
-# 然后，排除 data/ 目录本身（重要，为了能进一步排除其子目录）
-!data/
+# 忽略 data/ 目录下所有内容
+data/**/*
 
-# 接着，排除 data/alphafin/ 目录本身（如果 data/ 下还有其他你想忽略的子目录）
+# 排除 data/alphafin/ 目录本身 (为了能看到里面的文件)
 !data/alphafin/
 
+# 精确包含你想要追踪的特定文件
 !data/alphafin/alphafin_summarized_and_structured_qa_0627_b8_s50_fullsentence.json
-
 # Python cache
 __pycache__/
 *.pyc
