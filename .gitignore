@@ -1,81 +1,82 @@
-# Data directory
-checkpoints/*
-checkpoints/
-
-# 忽略 data/ 目录下所有内容
-data/**/*
-
-# 排除 data/alphafin/ 目录本身 (为了能看到里面的文件)
-!data/alphafin/
-
-# 精确包含你想要追踪的特定文件
-!data/alphafin/alphafin_summarized_and_structured_qa_0627_b8_s50_fullsentence.json
-# Python cache
+# --- Core Project Ignores ---
+# Python bytecode
 __pycache__/
 *.pyc
+*.pyo
 
-# Environment
-.env
+# Virtual environments
 venv/
-.idea/
+.venv/
+env/
+ENV/
 
-# Directories to ignore
+# IDE and OS generated files
 .idea/
-venv/
-.pytest_cache/
-__pycache__/
-src/outputs/
-outputs/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Build and distribution artifacts
 build/
 dist/
-LLMS.egg-info/
-xlm.egg-info/
-models/
-logs/
+*.egg-info/
+# LLMS.egg-info/ # If these are specific, you can uncomment. But *.egg-info/ covers them.
+# xlm.egg-info/
+
+# Logs and temporary files
+*.log
+*.out
+.nfs*
 temp/
-examples/
+logs/
+
+# Test cache
+.pytest_cache/
+
+# --- Data and Generated Output Specific Ignores (CRITICAL for your use case) ---
+# 1. 默认忽略 'data/' 目录下所有层级的文件和子目录的内容
+#    这条规则非常强大，会忽略 data/ 下的所有内容
+data/**/*
+
+# 2. 默认忽略 'checkpoints/' 目录下所有层级的内容
+checkpoints/**/*
+
+# 3. 默认忽略 'models/' 目录 (在项目根目录下，如果它不是软链接的话)
+#    如果你的 ./models/ 目录是存模型的，且你想忽略它，保留这条
+models/
+
+# 4. 默认忽略 'outputs/' 目录下的所有内容 (如果它在根目录下)
+outputs/
+src/outputs/ # 假定 src/outputs/ 也是要忽略的输出目录
+
+# 5. 默认忽略测试数据目录 (如果它在根目录下)
 test/data/
 
-# Cache and temp files
-*.pyo
-*.pyd
-.Python
-*.db
-*.sqlite
-*.npy
-*.arrow
+# --- Specific Inclusion Rules (These MUST come AFTER broad ignore rules) ---
+# 6. 排除 'data/alphafin/' 目录本身
+#    这一行是关键，它“重新打开”了 data/alphafin/ 目录，让Git能看到它内部的内容
+!data/alphafin/
+
+# 7. 精确包含你想要追踪的那个特定文件
+#    这是最终目标，它指明了唯一一个要被追踪的文件
+!data/alphafin/alphafin_summarized_and_structured_qa_0627_b8_s50_fullsentence.json
+
+# --- Model Artifacts (General) ---
+# 忽略常见的模型权重文件和索引文件，这些通常由HF缓存管理或在其他地方存储
 *.bin
 *.pt
+*.pth
 *.ckpt
 *.h5
 *.hdf5
 *.pkl
 *.model
 *.index
-
-# Environment files
-.env
-.venv
-env/
-ENV/
-.DS_Store
-
-# IDE files
-.vscode/
-*.swp
-*.swo
-.project
-.pydevproject
-.settings/
-
-# Logs
-*.log
-*.out
-.nfs*
-
-# Model files
 *.onnx
 *.tflite
 *.pb
 *.savedmodel
-*.pth
+
+# --- Examples/Temporary Dirs (If you don't want to track these) ---
+examples/
