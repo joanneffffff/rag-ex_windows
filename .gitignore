@@ -1,5 +1,5 @@
-# --- Core Project Ignores ---
-# Python bytecode
+# --- Project-specific ignores ---
+# Python caches
 __pycache__/
 *.pyc
 *.pyo
@@ -10,7 +10,7 @@ venv/
 env/
 ENV/
 
-# IDE and OS generated files
+# IDE and OS specific files
 .idea/
 .vscode/
 .DS_Store
@@ -21,10 +21,8 @@ ENV/
 build/
 dist/
 *.egg-info/
-# LLMS.egg-info/ # If these are specific, you can uncomment. But *.egg-info/ covers them.
-# xlm.egg-info/
 
-# Logs and temporary files
+# Logs and temporary files (if not specific to data/)
 *.log
 *.out
 .nfs*
@@ -34,49 +32,17 @@ logs/
 # Test cache
 .pytest_cache/
 
-# --- Data and Generated Output Specific Ignores (CRITICAL for your use case) ---
+# --- Data and Generated Output Specific Ignores (CRITICAL for your goal) ---
 # 1. 默认忽略 'data/' 目录下所有层级的文件和子目录的内容
-#    这条规则非常强大，会忽略 data/ 下的所有内容
+#    这是最宽泛的忽略规则，会递归忽略 data/ 下的一切。
 data/**/*
 
-# 2. 默认忽略 'checkpoints/' 目录下所有层级的内容
-checkpoints/**/*
-
-# 3. 默认忽略 'models/' 目录 (在项目根目录下，如果它不是软链接的话)
-#    如果你的 ./models/ 目录是存模型的，且你想忽略它，保留这条
-models/
-
-# 4. 默认忽略 'outputs/' 目录下的所有内容 (如果它在根目录下)
-outputs/
-src/outputs/ # 假定 src/outputs/ 也是要忽略的输出目录
-
-# 5. 默认忽略测试数据目录 (如果它在根目录下)
-test/data/
-
-# --- Specific Inclusion Rules (These MUST come AFTER broad ignore rules) ---
-# 6. 排除 'data/alphafin/' 目录本身
-#    这一行是关键，它“重新打开”了 data/alphafin/ 目录，让Git能看到它内部的内容
-!data/alphafin/
-
-# 7. 精确包含你想要追踪的那个特定文件
-#    这是最终目标，它指明了唯一一个要被追踪的文件
+# 2. 精确包含你想要追踪的那个特定文件
+#    这条规则否定了上面的 data/**/* 规则，只允许这一个文件被追踪。
+#    不需要单独的 !data/alphafin/ 规则了，因为 Git 足够智能可以直接找到文件。
 !data/alphafin/alphafin_summarized_and_structured_qa_0627_b8_s50_fullsentence.json
 
-# --- Model Artifacts (General) ---
-# 忽略常见的模型权重文件和索引文件，这些通常由HF缓存管理或在其他地方存储
-*.bin
-*.pt
-*.pth
-*.ckpt
-*.h5
-*.hdf5
-*.pkl
-*.model
-*.index
-*.onnx
-*.tflite
-*.pb
-*.savedmodel
-
-# --- Examples/Temporary Dirs (If you don't want to track these) ---
-examples/
+# --- Other Specific Ignores (If you have other top-level directories to ignore) ---
+# 例如，如果你有 models/ 或 checkpoints/ 目录需要忽略，可以在这里添加：
+models/
+checkpoints/
