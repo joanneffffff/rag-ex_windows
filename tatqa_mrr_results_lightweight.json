@@ -1,0 +1,15 @@
+{
+  "dataset": "TatQA增强版",
+  "total_samples": 100,
+  "found_samples": 76,
+  "recall": 0.76,
+  "mrr": 0.3738298409107233,
+  "hit_at_1": 0.28,
+  "hit_at_3": 0.41,
+  "hit_at_5": 0.46,
+  "hit_at_10": 0.58,
+  "mode": "CPU",
+  "enhanced_evaluation": true,
+  "lightweight_mode": true,
+  "knowledge_base_size": 493
+}

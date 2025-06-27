@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-测试检索质量 - MRR评估
-使用evaluate_mrr/alphafin_eval.jsonl和tatqa_eval.jsonl作为测试集
+测试检索质量 - MRR评估 (CPU版本)
+使用evaluate_mrr/alphafin_eval.jsonl和tatqa_eval_enhanced.jsonl作为测试集
 支持两种模式：
 1. 评估数据context加入知识库 - 测试真实检索能力
 2. 评估数据context不加入知识库 - 避免数据泄露
 
 改进的匹配策略：
-1. ID匹配（最鲁棒）
-2. 内容哈希匹配
-3. 相似度匹配
-4. 模糊文本匹配
+1. relevant_doc_ids匹配（最严格，适用于英文数据）
+2. ID匹配（适用于中文数据）
+3. 内容哈希匹配
+4. 相似度匹配
+5. 模糊文本匹配
 """
 
 import sys
@@ -26,6 +27,10 @@ sys.path.append(str(Path(__file__).parent))
 
 # 导入必要的类型
 from xlm.dto.dto import DocumentWithMetadata, DocumentMetadata
+
+# 导入增强版评估函数
+sys.path.append(str(Path(__file__).parent.parent))
+from enhanced_evaluation_functions import find_correct_document_rank_enhanced
 
 def load_eval_data(eval_file: str) -> List[Dict[str, Any]]:
     """加载评估数据"""
@@ -61,7 +66,7 @@ def find_correct_document_rank(
     encoder=None
 ) -> int:
     """
-    使用多种策略查找正确答案的排名
+    使用多种策略查找正确答案的排名（兼容旧版本）
     
     Args:
         context: 正确答案的context
@@ -72,145 +77,14 @@ def find_correct_document_rank(
     Returns:
         找到的排名，0表示未找到
     """
-    if not context or not retrieved_docs:
-        return 0
-    
-    # 策略1: ID匹配（最鲁棒）- 仅适用于中文数据
-    correct_doc_id = sample.get('doc_id') or sample.get('id') or sample.get('document_id')
-    if correct_doc_id:
-        for rank, doc in enumerate(retrieved_docs, 1):
-            # 尝试从文档内容中提取doc_id（如果是JSON格式）
-            try:
-                if doc.content.startswith('{'):
-                    doc_data = json.loads(doc.content)
-                    doc_id = doc_data.get('doc_id') or doc_data.get('id')
-                    if doc_id == correct_doc_id:
-                        return rank
-            except:
-                pass
-            
-            # 尝试从元数据中获取doc_id
-            doc_id = getattr(doc, 'id', None) or getattr(doc.metadata, 'id', None) or getattr(doc.metadata, 'doc_id', None)
-            if doc_id == correct_doc_id:
-                return rank
-    
-    # 策略2: 内容哈希匹配
-    context_hash = calculate_content_hash(context.strip())
-    for rank, doc in enumerate(retrieved_docs, 1):
-        # 处理JSON格式的文档内容
-        doc_content = doc.content
-        try:
-            if doc.content.startswith('{'):
-                doc_data = json.loads(doc.content)
-                # 提取context字段
-                doc_context = doc_data.get('context', '')
-                if doc_context:
-                    doc_content = doc_context
-        except:
-            pass
-        
-        doc_hash = calculate_content_hash(doc_content.strip())
-        if doc_hash == context_hash:
-            return rank
-    
-    # 策略3: 精确文本匹配（改进版）
-    context_clean = context.strip().lower()
-    for rank, doc in enumerate(retrieved_docs, 1):
-        # 处理JSON格式的文档内容
-        doc_content = doc.content
-        try:
-            if doc.content.startswith('{'):
-                doc_data = json.loads(doc.content)
-                # 提取context字段
-                doc_context = doc_data.get('context', '')
-                if doc_context:
-                    doc_content = doc_context
-        except:
-            pass
-        
-        doc_content_clean = doc_content.strip().lower()
-        
-        # 检查context是否包含在文档中，或文档是否包含在context中
-        if (context_clean in doc_content_clean or 
-            doc_content_clean in context_clean or
-            context_clean == doc_content_clean):
-            return rank
-    
-    # 策略4: 模糊文本匹配（使用关键词）
-    context_words = set(context_clean.split())
-    if len(context_words) > 3:  # 至少需要3个词
-        for rank, doc in enumerate(retrieved_docs, 1):
-            # 处理JSON格式的文档内容
-            doc_content = doc.content
-            try:
-                if doc.content.startswith('{'):
-                    doc_data = json.loads(doc.content)
-                    # 提取context字段
-                    doc_context = doc_data.get('context', '')
-                    if doc_context:
-                        doc_content = doc_context
-            except:
-                pass
-            
-            doc_content_clean = doc_content.strip().lower()
-            doc_words = set(doc_content_clean.split())
-            
-            # 计算词汇重叠度
-            overlap = len(context_words.intersection(doc_words))
-            overlap_ratio = overlap / len(context_words)
-            
-            # 如果重叠度超过70%，认为匹配
-            if overlap_ratio > 0.7:
-                return rank
-    
-    # 策略5: 相似度匹配（如果有编码器）
-    if encoder and len(context) > 10:  # 确保context足够长
-        try:
-            context_embedding = encoder.encode([context])
-            
-            # 准备文档内容用于编码
-            doc_contents = []
-            for doc in retrieved_docs:
-                doc_content = doc.content
-                try:
-                    if doc.content.startswith('{'):
-                        doc_data = json.loads(doc.content)
-                        # 提取context字段
-                        doc_context = doc_data.get('context', '')
-                        if doc_context:
-                            doc_content = doc_context
-                except:
-                    pass
-                doc_contents.append(doc_content)
-            
-            doc_embeddings = encoder.encode(doc_contents)
-            
-            # 计算余弦相似度
-            similarities = []
-            for doc_emb in doc_embeddings:
-                cos_sim = np.dot(context_embedding[0], doc_emb) / (
-                    np.linalg.norm(context_embedding[0]) * np.linalg.norm(doc_emb)
-                )
-                similarities.append(cos_sim)
-            
-            # 找到最高相似度的文档
-            max_sim_idx = int(np.argmax(similarities))
-            max_similarity = similarities[max_sim_idx]
-            
-            # 如果相似度超过阈值，认为匹配
-            if max_similarity > 0.8:
-                return max_sim_idx + 1
-                
-        except Exception as e:
-            print(f"相似度计算失败: {e}")
-    
-    return 0
+    # 使用增强版函数
+    return find_correct_document_rank_enhanced(context, retrieved_docs, sample, encoder)
 
 def test_retrieval_with_eval_context(include_eval_data: bool = True):
     """测试检索质量 - 可选择是否包含评估数据到知识库"""
     mode = "包含评估数据" if include_eval_data else "不包含评估数据"
     print("=" * 60)
-    print(f"测试检索质量 - MRR评估 ({mode})")
+    print(f"测试检索质量 - MRR评估 ({mode}) - CPU版本")
     print("=" * 60)
     
     try:
@@ -221,20 +95,18 @@ def test_retrieval_with_eval_context(include_eval_data: bool = True):
         
         config = Config()
         
-        print("1. 加载编码器...")
-        # encoder_ch = FinbertEncoder(
-        #     model_name="models/finetuned_alphafin_zh",
-        #     cache_dir=config.encoder.cache_dir,
-        # )
+        print("1. 加载编码器（CPU模式）...")
         encoder_ch = FinbertEncoder(
             model_name="./models/finetuned_alphafin_zh_optimized",
             cache_dir=config.encoder.cache_dir,
+            device="cpu"  # 强制使用CPU
         )
         encoder_en = FinbertEncoder(
             model_name="models/finetuned_finbert_tatqa",
             cache_dir=config.encoder.cache_dir,
+            device="cpu"  # 强制使用CPU
         )
-        print("   ✅ 编码器加载成功")
+        print("   ✅ 编码器加载成功（CPU模式）")
         
         print("\n2. 加载训练数据（知识库）...")
         data_loader = OptimizedDataLoader(
@@ -254,30 +126,31 @@ def test_retrieval_with_eval_context(include_eval_data: bool = True):
         
         print("\n3. 加载评估数据...")
         alphafin_eval = load_eval_data("evaluate_mrr/alphafin_eval.jsonl")
-        tatqa_eval = load_eval_data("evaluate_mrr/tatqa_eval.jsonl")
+        # 使用增强版TatQA数据
+        tatqa_eval = load_eval_data("evaluate_mrr/tatqa_eval_enhanced.jsonl")
         
         print(f"   ✅ 评估数据加载成功:")
         print(f"      AlphaFin评估样本: {len(alphafin_eval)}")
-        print(f"      TatQA评估样本: {len(tatqa_eval)}")
+        print(f"      TatQA增强版评估样本: {len(tatqa_eval)}")
         
-        print("\n4. 创建检索器...")
+        print("\n4. 创建检索器（CPU模式）...")
         retriever = BilingualRetriever(
             encoder_en=encoder_en,
             encoder_ch=encoder_ch,
             corpus_documents_en=english_chunks,
             corpus_documents_ch=chinese_chunks,
             use_faiss=True,
-            use_gpu=False,
-            batch_size=8,
+            use_gpu=False,  # 强制不使用GPU
+            batch_size=4,   # 减小batch_size以适应CPU
             cache_dir=config.encoder.cache_dir
         )
-        print("   ✅ 检索器创建成功")
+        print("   ✅ 检索器创建成功（CPU模式）")
         
         print("\n5. 测试中文检索质量 (AlphaFin)...")
         chinese_ranks = []
         chinese_queries = []
         
-        for i, sample in enumerate(tqdm(alphafin_eval[:100], desc="测试中文检索")):  # 测试前100个样本
+        for i, sample in enumerate(tqdm(alphafin_eval[:50], desc="测试中文检索")):  # 减少测试样本以适应CPU
             query = sample.get('question', '')
             context = sample.get('context', '')
             
@@ -307,19 +180,19 @@ def test_retrieval_with_eval_context(include_eval_data: bool = True):
             chinese_ranks.append(found_rank)
             chinese_queries.append(query)
             
-            if i < 5:  # 显示前5个样本的详细信息
+            if i < 3:  # 显示前3个样本的详细信息
                 print(f"   查询 {i+1}: {query[:50]}...")
                 print(f"   找到位置: {found_rank}")
                 if found_rank > 0:
                     print(f"   相关文档: {retrieved_docs[found_rank-1].content[:100]}...")
                 print()
         
-        print("\n6. 测试英文检索质量 (TatQA)...")
+        print("\n6. 测试英文检索质量 (TatQA增强版)...")
         english_ranks = []
         english_queries = []
         
-        for i, sample in enumerate(tqdm(tatqa_eval[:100], desc="测试英文检索")):  # 测试前100个样本
-            query = sample.get('question', '')
+        for i, sample in enumerate(tqdm(tatqa_eval[:50], desc="测试英文检索")):  # 减少测试样本以适应CPU
+            query = sample.get('query', '')
             context = sample.get('context', '')
             
             if not query or not context:
@@ -340,23 +213,24 @@ def test_retrieval_with_eval_context(include_eval_data: bool = True):
                 retrieved_docs = retrieved_result
                 scores = []
             
-            # 检查正确答案是否在检索结果中
-            found_rank = find_correct_document_rank(
+            # 检查正确答案是否在检索结果中（使用增强版函数）
+            found_rank = find_correct_document_rank_enhanced(
                 context, retrieved_docs, sample, encoder_en
             )
             
             english_ranks.append(found_rank)
             english_queries.append(query)
             
-            if i < 5:  # 显示前5个样本的详细信息
+            if i < 3:  # 显示前3个样本的详细信息
                 print(f"   Query {i+1}: {query[:50]}...")
                 print(f"   Found at rank: {found_rank}")
+                print(f"   Relevant doc IDs: {sample.get('relevant_doc_ids', [])}")
                 if found_rank > 0:
                     print(f"   Relevant doc: {retrieved_docs[found_rank-1].content[:100]}...")
                 print()
         
         print("\n" + "=" * 60)
-        print(f"检索质量评估结果 ({mode})")
+        print(f"检索质量评估结果 ({mode}) - CPU版本")
         print("=" * 60)
         
         # 计算中文检索指标
@@ -378,7 +252,7 @@ def test_retrieval_with_eval_context(include_eval_data: bool = True):
         english_hit5 = calculate_hit_rate(english_ranks, k=5)
         english_hit10 = calculate_hit_rate(english_ranks, k=10)
         
-        print(f"\n英文检索 (TatQA):")
+        print(f"\n英文检索 (TatQA增强版):")
         print(f"  样本数: {len(english_ranks)}")
         print(f"  MRR: {english_mrr:.4f}")
         print(f"  Hit@1: {english_hit1:.4f}")
@@ -399,40 +273,29 @@ def test_retrieval_with_eval_context(include_eval_data: bool = True):
         print(f"  Hit@5: {overall_hit5:.4f}")
         print(f"  Hit@10: {overall_hit10:.4f}")
         
-        # 保存结果
-        suffix = "with_eval" if include_eval_data else "without_eval"
-        results = {
-            "mode": mode,
-            "chinese": {
-                "mrr": chinese_mrr,
-                "hit1": chinese_hit1,
-                "hit5": chinese_hit5,
-                "hit10": chinese_hit10,
-                "sample_count": len(chinese_ranks)
+        return {
+            'chinese': {
+                'mrr': chinese_mrr,
+                'hit_at_1': chinese_hit1,
+                'hit_at_5': chinese_hit5,
+                'hit_at_10': chinese_hit10,
+                'samples': len(chinese_ranks)
             },
-            "english": {
-                "mrr": english_mrr,
-                "hit1": english_hit1,
-                "hit5": english_hit5,
-                "hit10": english_hit10,
-                "sample_count": len(english_ranks)
+            'english': {
+                'mrr': english_mrr,
+                'hit_at_1': english_hit1,
+                'hit_at_5': english_hit5,
+                'hit_at_10': english_hit10,
+                'samples': len(english_ranks)
             },
-            "overall": {
-                "mrr": overall_mrr,
-                "hit1": overall_hit1,
-                "hit5": overall_hit5,
-                "hit10": overall_hit10,
-                "sample_count": len(all_ranks)
+            'overall': {
+                'mrr': overall_mrr,
+                'hit_at_1': overall_hit1,
+                'hit_at_5': overall_hit5,
+                'hit_at_10': overall_hit10,
+                'samples': len(all_ranks)
             }
         }
-        
-        filename = f"retrieval_mrr_results_{suffix}.json"
-        with open(filename, "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-        
-        print(f"\n结果已保存到: {filename}")
-        
-        return results
         
     except Exception as e:
         print(f"❌ 测试失败: {e}")
@@ -441,97 +304,61 @@ def test_retrieval_with_eval_context(include_eval_data: bool = True):
         return None
 
 def compare_retrieval_modes():
-    """对比两种检索模式的效果"""
-    print("=" * 80)
-    print("对比检索模式：包含评估数据 vs 不包含评估数据")
-    print("=" * 80)
+    """比较不同检索模式的效果"""
+    print("=" * 60)
+    print("比较不同检索模式的效果")
+    print("=" * 60)
     
     # 测试包含评估数据的模式
-    print("\n🔍 测试模式1：包含评估数据到知识库")
+    print("\n1. 测试包含评估数据的模式...")
     results_with_eval = test_retrieval_with_eval_context(include_eval_data=True)
     
-    print("\n" + "=" * 80)
-    
     # 测试不包含评估数据的模式
-    print("\n🔍 测试模式2：不包含评估数据到知识库")
+    print("\n2. 测试不包含评估数据的模式...")
     results_without_eval = test_retrieval_with_eval_context(include_eval_data=False)
     
-    # 对比结果
+    # 比较结果
+    print("\n" + "=" * 60)
+    print("模式比较结果")
+    print("=" * 60)
+    
     if results_with_eval and results_without_eval:
-        print("\n" + "=" * 80)
-        print("模式对比结果")
-        print("=" * 80)
-        
-        print(f"{'指标':<15} {'包含评估数据':<15} {'不包含评估数据':<15} {'差异':<10}")
-        print("-" * 60)
-        
-        # 中文对比
-        ch_zh_mrr_diff = results_with_eval["chinese"]["mrr"] - results_without_eval["chinese"]["mrr"]
-        ch_zh_hit1_diff = results_with_eval["chinese"]["hit1"] - results_without_eval["chinese"]["hit1"]
-        
-        print(f"{'中文MRR':<15} {results_with_eval['chinese']['mrr']:<15.4f} {results_without_eval['chinese']['mrr']:<15.4f} {ch_zh_mrr_diff:+.4f}")
-        print(f"{'中文Hit@1':<15} {results_with_eval['chinese']['hit1']:<15.4f} {results_without_eval['chinese']['hit1']:<15.4f} {ch_zh_hit1_diff:+.4f}")
-        
-        # 英文对比
-        ch_en_mrr_diff = results_with_eval["english"]["mrr"] - results_without_eval["english"]["mrr"]
-        ch_en_hit1_diff = results_with_eval["english"]["hit1"] - results_without_eval["english"]["hit1"]
-        
-        print(f"{'英文MRR':<15} {results_with_eval['english']['mrr']:<15.4f} {results_without_eval['english']['mrr']:<15.4f} {ch_en_mrr_diff:+.4f}")
-        print(f"{'英文Hit@1':<15} {results_with_eval['english']['hit1']:<15.4f} {results_without_eval['english']['hit1']:<15.4f} {ch_en_hit1_diff:+.4f}")
-        
-        # 总体对比
-        ch_overall_mrr_diff = results_with_eval["overall"]["mrr"] - results_without_eval["overall"]["mrr"]
-        ch_overall_hit1_diff = results_with_eval["overall"]["hit1"] - results_without_eval["overall"]["hit1"]
-        
-        print(f"{'总体MRR':<15} {results_with_eval['overall']['mrr']:<15.4f} {results_without_eval['overall']['mrr']:<15.4f} {ch_overall_mrr_diff:+.4f}")
-        print(f"{'总体Hit@1':<15} {results_with_eval['overall']['hit1']:<15.4f} {results_without_eval['overall']['hit1']:<15.4f} {ch_overall_hit1_diff:+.4f}")
-        
-        # 保存对比结果
-        comparison_results = {
-            "with_eval_data": results_with_eval,
-            "without_eval_data": results_without_eval,
-            "differences": {
-                "chinese_mrr_diff": ch_zh_mrr_diff,
-                "chinese_hit1_diff": ch_zh_hit1_diff,
-                "english_mrr_diff": ch_en_mrr_diff,
-                "english_hit1_diff": ch_en_hit1_diff,
-                "overall_mrr_diff": ch_overall_mrr_diff,
-                "overall_hit1_diff": ch_overall_hit1_diff
-            }
-        }
-        
-        with open("retrieval_comparison_results.json", "w", encoding="utf-8") as f:
-            json.dump(comparison_results, f, indent=2, ensure_ascii=False)
-        
-        print(f"\n对比结果已保存到: retrieval_comparison_results.json")
-        
-        # 分析建议
-        print(f"\n📊 分析建议:")
-        if ch_overall_mrr_diff > 0.1:
-            print(f"   ✅ 包含评估数据显著提升了检索质量 (MRR提升 {ch_overall_mrr_diff:.4f})")
-            print(f"   💡 建议：评估数据的context应该加入知识库以测试真实检索能力")
-        elif ch_overall_mrr_diff < -0.1:
-            print(f"   ⚠️  包含评估数据降低了检索质量 (MRR下降 {abs(ch_overall_mrr_diff):.4f})")
-            print(f"   💡 建议：可能存在数据泄露问题，需要进一步分析")
-        else:
-            print(f"   🔍 两种模式效果相近，差异不大")
-            print(f"   💡 建议：可以根据具体需求选择模式")
+        print("包含评估数据 vs 不包含评估数据:")
+        print(f"中文MRR: {results_with_eval['chinese']['mrr']:.4f} vs {results_without_eval['chinese']['mrr']:.4f}")
+        print(f"英文MRR: {results_with_eval['english']['mrr']:.4f} vs {results_without_eval['english']['mrr']:.4f}")
+        print(f"总体MRR: {results_with_eval['overall']['mrr']:.4f} vs {results_without_eval['overall']['mrr']:.4f}")
+    else:
+        print("❌ 比较失败")
 
 def test_retrieval_quality():
-    """原始测试函数 - 保持向后兼容"""
-    return test_retrieval_with_eval_context(include_eval_data=False)
+    """测试检索质量"""
+    print("=" * 60)
+    print("测试检索质量")
+    print("=" * 60)
+    
+    # 默认测试不包含评估数据的模式
+    results = test_retrieval_with_eval_context(include_eval_data=False)
+    
+    if results:
+        print("\n🎉 测试完成！")
+        print(f"总体MRR: {results['overall']['mrr']:.4f}")
+        print(f"总体Hit@1: {results['overall']['hit_at_1']:.4f}")
+    else:
+        print("❌ 测试失败")
 
 def evaluate_retrieval_quality(include_eval_data=True, max_eval_samples=None):
     """
-    评估检索质量
+    完整评估检索质量
     
     Args:
-        include_eval_data: 是否将评估数据包含在知识库中
-        max_eval_samples: 最大评估样本数，None表示评估所有样本
+        include_eval_data: 是否包含评估数据到知识库
+        max_eval_samples: 最大评估样本数
     """
-    print("=== 检索质量评估 ===")
-    print(f"包含评估数据到知识库: {include_eval_data}")
-    print(f"最大评估样本数: {max_eval_samples if max_eval_samples else '全部'}")
+    print("=" * 60)
+    print(f"完整评估检索质量 (CPU版本)")
+    print(f"包含评估数据: {include_eval_data}")
+    print(f"最大样本数: {max_eval_samples}")
+    print("=" * 60)
     
     try:
         from config.parameters import Config
@@ -541,51 +368,48 @@ def evaluate_retrieval_quality(include_eval_data=True, max_eval_samples=None):
         
         config = Config()
         
-        print("\n1. 加载编码器...")
-        # encoder_ch = FinbertEncoder(
-        #     model_name="models/finetuned_alphafin_zh",
-        #     cache_dir=config.encoder.cache_dir,
-        # )
+        print("1. 加载编码器（CPU模式）...")
         encoder_ch = FinbertEncoder(
             model_name="./models/finetuned_alphafin_zh_optimized",
             cache_dir=config.encoder.cache_dir,
+            device="cpu"
         )
         encoder_en = FinbertEncoder(
             model_name="models/finetuned_finbert_tatqa",
             cache_dir=config.encoder.cache_dir,
+            device="cpu"
         )
         print("   ✅ 编码器加载成功")
         
-        print("\n2. 加载训练数据（知识库）...")
+        print("\n2. 加载数据...")
         data_loader = OptimizedDataLoader(
             data_dir="data",
-            max_samples=-1,  # 加载所有数据
+            max_samples=-1,
             chinese_document_level=True,
             english_chunk_level=True,
-            include_eval_data=include_eval_data  # 直接控制是否包含评估数据
+            include_eval_data=include_eval_data
         )
         
         chinese_chunks = data_loader.chinese_docs
         english_chunks = data_loader.english_docs
         
-        print(f"   ✅ 训练数据加载成功:")
+        print(f"   ✅ 数据加载成功:")
         print(f"      中文chunks: {len(chinese_chunks)}")
         print(f"      英文chunks: {len(english_chunks)}")
         
         print("\n3. 加载评估数据...")
         alphafin_eval = load_eval_data("evaluate_mrr/alphafin_eval.jsonl")
-        tatqa_eval = load_eval_data("evaluate_mrr/tatqa_eval.jsonl")
+        tatqa_eval = load_eval_data("evaluate_mrr/tatqa_eval_enhanced.jsonl")  # 使用增强版
         
-        # 如果指定了最大样本数，则进行采样
         if max_eval_samples:
             alphafin_eval = alphafin_eval[:max_eval_samples]
             tatqa_eval = tatqa_eval[:max_eval_samples]
         
         print(f"   ✅ 评估数据加载成功:")
         print(f"      AlphaFin评估样本: {len(alphafin_eval)}")
-        print(f"      TatQA评估样本: {len(tatqa_eval)}")
+        print(f"      TatQA增强版评估样本: {len(tatqa_eval)}")
         
-        print("\n4. 创建检索器...")
+        print("\n4. 创建检索器（CPU模式）...")
         retriever = BilingualRetriever(
             encoder_en=encoder_en,
             encoder_ch=encoder_ch,
@@ -593,12 +417,10 @@ def evaluate_retrieval_quality(include_eval_data=True, max_eval_samples=None):
             corpus_documents_ch=chinese_chunks,
             use_faiss=True,
             use_gpu=False,
-            batch_size=8,
+            batch_size=4,
             cache_dir=config.encoder.cache_dir
         )
         print("   ✅ 检索器创建成功")
-        
-        print("\n5. 开始评估...")
         
         # 评估中文数据
         print(f"\n--- 评估中文数据 (AlphaFin) ---")
@@ -611,7 +433,7 @@ def evaluate_retrieval_quality(include_eval_data=True, max_eval_samples=None):
         )
         
         # 评估英文数据
-        print(f"\n--- 评估英文数据 (TatQA) ---")
+        print(f"\n--- 评估英文数据 (TatQA增强版) ---")
         english_results = evaluate_dataset(
             eval_data=tatqa_eval,
             retriever=retriever,
@@ -631,7 +453,7 @@ def evaluate_retrieval_quality(include_eval_data=True, max_eval_samples=None):
         print(f"  总样本数: {chinese_results['total_samples']}")
         print(f"  找到正确答案的样本数: {chinese_results['found_samples']}")
         
-        print(f"\n英文数据 (TatQA):")
+        print(f"\n英文数据 (TatQA增强版):")
         print(f"  MRR: {english_results['mrr']:.4f}")
         print(f"  Hit@1: {english_results['hit_at_1']:.4f}")
         print(f"  Hit@3: {english_results['hit_at_3']:.4f}")
@@ -694,11 +516,14 @@ def evaluate_dataset(eval_data, retriever, encoder, language, dataset_name):
     found_samples = 0
     
     for i, sample in enumerate(eval_data):
-        if i % 100 == 0:
+        if i % 50 == 0:  # 减少进度显示频率以适应CPU
             print(f"  处理进度: {i}/{len(eval_data)}")
         
-        query = sample['query']
-        context = sample['context']
+        query = sample.get('query', sample.get('question', ''))
+        context = sample.get('context', '')
+        
+        if not query or not context:
+            continue
         
         try:
             # 检索
@@ -715,8 +540,8 @@ def evaluate_dataset(eval_data, retriever, encoder, language, dataset_name):
                 retrieved_docs = retrieved_result
                 scores = []
             
-            # 找到正确答案的排名
-            found_rank = find_correct_document_rank(
+            # 找到正确答案的排名（使用增强版函数）
+            found_rank = find_correct_document_rank_enhanced(
                 context=context,
                 retrieved_docs=retrieved_docs,
                 sample=sample,
@@ -772,21 +597,26 @@ def evaluate_dataset(eval_data, retriever, encoder, language, dataset_name):
 if __name__ == "__main__":
     import argparse
     
-    parser = argparse.ArgumentParser(description="评估检索质量")
+    parser = argparse.ArgumentParser(description="评估检索质量（CPU版本）")
     parser.add_argument("--include_eval_data", action="store_true", 
                        help="是否将评估数据包含在知识库中")
     parser.add_argument("--max_samples", type=int, default=None,
                        help="最大评估样本数，None表示评估所有样本")
     parser.add_argument("--test_mode", action="store_true",
                        help="测试模式，只评估少量样本")
+    parser.add_argument("--compare_modes", action="store_true",
+                       help="比较不同检索模式")
     
     args = parser.parse_args()
     
-    if args.test_mode:
-        print("=== 测试模式 ===")
+    if args.compare_modes:
+        print("=== 比较检索模式 ===")
+        compare_retrieval_modes()
+    elif args.test_mode:
+        print("=== 测试模式（CPU版本）===")
         test_retrieval_with_eval_context(include_eval_data=args.include_eval_data)
     else:
-        print("=== 完整评估模式 ===")
+        print("=== 完整评估模式（CPU版本）===")
         # 默认评估所有数据
         max_samples = args.max_samples if args.max_samples else None
         results = evaluate_retrieval_quality(
