@@ -29,7 +29,7 @@ class EncoderConfig:
     # 英文微调模型路径
     english_model_path: str = "models/finetuned_finbert_tatqa"
     cache_dir: str = EMBEDDING_CACHE_DIR
-    device: Optional[str] = None  # Will auto-detect if None
+    device: Optional[str] = "cuda:0"  # 编码器使用cuda:0
     batch_size: int = 32
     max_length: int = 512
 
@@ -37,7 +37,7 @@ class EncoderConfig:
 class RerankerConfig:
     model_name: str = "Qwen/Qwen3-Reranker-0.6B"
     cache_dir: str = RERANKER_CACHE_DIR
-    device: Optional[str] = None  # Will auto-detect if None
+    device: Optional[str] = "cuda:0"  # 重排序器使用cuda:0
     use_quantization: bool = True
     quantization_type: str = "4bit"  # 改为4bit量化以节省GPU内存
     batch_size: int = 4
@@ -53,8 +53,8 @@ class RetrieverConfig:
     # 重排序相关配置
     retrieval_top_k: int = 100  # FAISS检索的top-k
     rerank_top_k: int = 20      # 重排序后的top-k，从10增加到20
-    # 新增参数
-    use_existing_embedding_index: bool = True  # 强制重新计算embedding，确保生成中文embedding
+    # 新增参数data/alphafin/alphafin_merged_generated_qa.json
+    use_existing_embedding_index: bool = False  # 强制重新计算embedding，确保生成中文embedding
     max_alphafin_chunks: int = 1000000  # 限制AlphaFin数据chunk数量
 
 @dataclass
@@ -62,7 +62,7 @@ class DataConfig:
     data_dir: str = "data"  # Unified root data directory
     max_samples: int = -1  # -1表示加载所有数据，500表示限制样本数
     # 数据路径配置
-    chinese_data_path: str = "evaluate_mrr/alphafin_train_qc.jsonl"  # 中文数据路径
+    chinese_data_path: str = "data/alphafin/alphafin_merged_generated_qa.json"  # 中文数据路径
     english_data_path: str = "evaluate_mrr/tatqa_train_qc.jsonl"     # 英文数据路径
 
 @dataclass
@@ -82,8 +82,8 @@ class SystemConfig:
 class GeneratorConfig:
     # 可选的生成器模型
     # model_name: str = "Qwen/Qwen2-1.5B-Instruct"  # 原始小模型
-    model_name: str = "Qwen/Qwen3-8B"  # Qwen3-8B基础版本，更大的模型，替代Fin-R1
-    # model_name: str = "SUFE-AIFLM-Lab/Fin-R1"  # 上海财经大学金融推理大模型，专门针对金融领域优化
+    # model_name: str = "Qwen/Qwen3-8B"  # Qwen3-8B基础版本，更大的模型，替代Fin-R1
+    model_name: str = "SUFE-AIFLM-Lab/Fin-R1"  # 上海财经大学金融推理大模型，专门针对金融领域优化
     cache_dir: str = GENERATOR_CACHE_DIR
     
     # 模型特定配置 - 针对Qwen3-8B优化的参数

@@ -59,7 +59,7 @@ PROMPT_TEMPLATE_ZH_CLEAN = """基于以下上下文信息，直接回答用户�
 
 PROMPT_TEMPLATE_ZH = """基于以下上下文信息，直接回答用户问题。只使用提供的信息，不要添加任何外部知识或格式化内容。
 
-**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 \\boxed{{}}、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
+**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 \\boxed{}、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
 
 示例1：
 上下文：中国平安2023年第一季度实现营业收入2,345.67亿元，同比增长8.5%；净利润为156.78亿元，同比增长12.3%。
@@ -128,7 +128,7 @@ class RagSystem:
         
         # 2. Retrieve relevant documents
         retrieved_documents, retriever_scores = self.retriever.retrieve(
-            text=user_input, top_k=self.retriever_top_k, return_scores=True, language=language
+            text=user_input, top_k=self.retriever_top_k, return_scores=True
         )
 
         # 3. Select prompt based on question language and format the context
@@ -157,7 +157,12 @@ class RagSystem:
         context_str = "\n\n".join([doc.content for doc in retrieved_documents])
         
         # 4. Create the final prompt
-        prompt = prompt_template.format(context=context_str, question=user_input)
+        try:
+            prompt = prompt_template.format(context=context_str, question=user_input)
+        except (KeyError, IndexError) as e:
+            # 如果命名参数失败，尝试使用位置参数
+            print(f"Warning: Named parameter formatting failed, trying positional: {e}")
+            prompt = prompt_template.format(context_str, user_input)
         
         # 5. Generate the response
         generated_responses = self.generator.generate(texts=[prompt])

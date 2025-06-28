@@ -13,8 +13,8 @@ class QwenReranker:
     def __init__(
         self,
         model_name: str = "Qwen/Qwen3-Reranker-0.6B",
-        device: str = None,
-        cache_dir: str = None,
+        device: Optional[str] = None,
+        cache_dir: Optional[str] = None,
         use_quantization: bool = True,
         quantization_type: str = "8bit",  # "8bit" or "4bit"
         use_flash_attention: bool = False
@@ -106,7 +106,7 @@ class QwenReranker:
         
         print("重排序器模型加载完成")
     
-    def format_instruction(self, instruction: str, query: str, document: str) -> str:
+    def format_instruction(self, instruction: Optional[str], query: str, document: str) -> str:
         """
         格式化指令（按照官方实现）
         
@@ -133,23 +133,14 @@ class QwenReranker:
         Returns:
             分词器输出字典
         """
-        # 为每个输入添加prefix和suffix tokens
+        # 为每个输入添加prefix和suffix
         processed_pairs = []
         for pair in pairs:
-            # 预编码prefix和suffix tokens
-            prefix_tokens = self.tokenizer.encode(self.prefix, add_special_tokens=False)
-            suffix_tokens = self.tokenizer.encode(self.suffix, add_special_tokens=False)
-            
-            # 编码主要内容
-            content_tokens = self.tokenizer.encode(pair, add_special_tokens=False, 
-                                                  max_length=self.max_length - len(prefix_tokens) - len(suffix_tokens),
-                                                  truncation=True)
-            
-            # 组合所有tokens
-            full_tokens = prefix_tokens + content_tokens + suffix_tokens
-            processed_pairs.append(full_tokens)
+            # 直接组合字符串，而不是预编码tokens
+            full_text = self.prefix + pair + self.suffix
+            processed_pairs.append(full_text)
         
-        # 直接使用tokenizer.__call__方法进行padding（更高效）
+        # 使用tokenizer处理完整的字符串
         inputs = self.tokenizer(
             processed_pairs,
             padding='max_length',

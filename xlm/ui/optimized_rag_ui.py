@@ -26,6 +26,16 @@ from xlm.registry.retriever import load_enhanced_retriever
 from xlm.registry.generator import load_generator
 from config.parameters import Config, EncoderConfig, RetrieverConfig, ModalityConfig, EMBEDDING_CACHE_DIR, RERANKER_CACHE_DIR
 
+# 尝试导入多阶段检索系统
+try:
+    sys.path.append(str(Path(__file__).parent.parent.parent / "alphafin_data_process"))
+    from multi_stage_retrieval_final import MultiStageRetrievalSystem
+    MULTI_STAGE_AVAILABLE = True
+except ImportError as e:
+    print(f"多阶段检索系统导入失败: {e}")
+    MULTI_STAGE_AVAILABLE = False
+    MultiStageRetrievalSystem = None
+
 def try_load_qwen_reranker(model_name, cache_dir=None):
     """尝试加载Qwen重排序器，支持GPU 0和CPU回退"""
     try:
@@ -160,16 +170,43 @@ class OptimizedRagUI:
         # 使用config中的平台感知配置
         config = Config()
         
+        # 初始化多阶段检索系统（用于中文查询）
+        print("\nStep 1.0. Initializing Multi-Stage Retrieval System for Chinese queries...")
+        self.multi_stage_system = None
+        if MULTI_STAGE_AVAILABLE and MultiStageRetrievalSystem:
+            try:
+                # 中文数据路径
+                chinese_data_path = Path("data/alphafin/alphafin_merged_generated_qa.json")
+                
+                if chinese_data_path.exists():
+                    print("✅ 初始化中文多阶段检索系统...")
+                    self.multi_stage_system = MultiStageRetrievalSystem(
+                        data_path=chinese_data_path,
+                        dataset_type="chinese",
+                        use_existing_config=True
+                    )
+                    print("✅ 中文多阶段检索系统初始化完成")
+                else:
+                    print(f"❌ 中文数据文件不存在: {chinese_data_path}")
+                    self.multi_stage_system = None
+                    
+            except Exception as e:
+                print(f"❌ 多阶段检索系统初始化失败: {e}")
+                self.multi_stage_system = None
+        else:
+            print("❌ 多阶段检索系统不可用，将使用传统RAG系统")
+            self.multi_stage_system = None
+        
         # 使用优化的数据加载器，实现文档级别chunking
         print("\nStep 1.1. Loading data with optimized chunking...")
         try:
             from xlm.utils.optimized_data_loader import OptimizedDataLoader
             
-            # 使用文档级别chunking处理中文数据
+            # 对于AlphaFin数据，使用原始流程进行chunking
             data_loader = OptimizedDataLoader(
                 data_dir="data",
                 max_samples=config.data.max_samples,
-                chinese_document_level=True,  # 中文使用文档级别
+                chinese_document_level=False,  # AlphaFin使用chunk级别处理
                 english_chunk_level=True      # 英文保持chunk级别
             )
             
@@ -217,14 +254,23 @@ class OptimizedRagUI:
         from xlm.components.retriever.bilingual_retriever import BilingualRetriever
         from xlm.components.encoder.finbert import FinbertEncoder
         
-        print("\nStep 2. Loading Chinese encoder (models/finetuned_alphafin_zh)...")
+        # 使用配置中的模型路径，并转换为绝对路径
+        chinese_model_path = config.encoder.chinese_model_path
+        english_model_path = config.encoder.english_model_path
+        
+        if not Path(chinese_model_path).is_absolute():
+            chinese_model_path = str(Path(__file__).parent.parent.parent / chinese_model_path)
+        if not Path(english_model_path).is_absolute():
+            english_model_path = str(Path(__file__).parent.parent.parent / english_model_path)
+        
+        print(f"\nStep 2. Loading Chinese encoder ({chinese_model_path})...")
         encoder_ch = FinbertEncoder(
-            model_name="models/finetuned_alphafin_zh",
+            model_name=chinese_model_path,
             cache_dir=config.encoder.cache_dir,  # 使用encoder的缓存目录
         )
-        print("Step 3. Loading English encoder (models/finetuned_finbert_tatqa)...")
+        print(f"Step 3. Loading English encoder ({english_model_path})...")
         encoder_en = FinbertEncoder(
-            model_name="models/finetuned_finbert_tatqa",
+            model_name=english_model_path,
             cache_dir=config.encoder.cache_dir,  # 使用encoder的缓存目录
         )
         
@@ -409,6 +455,104 @@ class OptimizedRagUI:
             language = 'en'
         print(f"Detected language: {language}")
         
+        # 根据语言选择检索系统
+        if language == 'zh' and self.multi_stage_system:
+            print("🔍 使用中文多阶段检索系统...")
+            return self._process_chinese_with_multi_stage(question, reranker_checkbox)
+        else:
+            print("🔍 使用传统RAG系统...")
+            return self._process_with_traditional_rag(question, language, reranker_checkbox)
+    
+    def _process_chinese_with_multi_stage(self, question: str, reranker_checkbox: bool) -> tuple[str, List[List[str]], Optional[gr.Plot]]:
+        """使用多阶段检索系统处理中文查询"""
+        if not self.multi_stage_system:
+            print("❌ 多阶段检索系统未初始化，回退到传统检索")
+            return self._process_with_traditional_rag(question, 'zh', reranker_checkbox)
+            
+        try:
+            # 尝试提取公司名称和股票代码用于元数据过滤
+            company_name = None
+            stock_code = None
+            
+            # 简单的实体提取
+            import re
+            # 提取股票代码
+            stock_match = re.search(r'\((\d{6})\)', question)
+            if stock_match:
+                stock_code = stock_match.group(1)
+            
+            # 提取公司名称（简单实现）
+            company_patterns = [
+                r'([^，。？\s]+(?:股份|集团|公司|有限|科技|网络|银行|证券|保险))',
+                r'([^，。？\s]+(?:股份|集团|公司|有限|科技|网络|银行|证券|保险)[^，。？\s]*)'
+            ]
+            
+            for pattern in company_patterns:
+                company_match = re.search(pattern, question)
+                if company_match:
+                    company_name = company_match.group(1)
+                    break
+            
+            # 执行多阶段检索
+            results = self.multi_stage_system.search(
+                query=question,
+                company_name=company_name,
+                stock_code=stock_code,
+                top_k=20
+            )
+            
+            # 转换为DocumentWithMetadata格式
+            retrieved_documents = []
+            retriever_scores = []
+            
+            for result in results:
+                # 创建DocumentWithMetadata对象
+                doc = DocumentWithMetadata(
+                    content=result.get('original_context', result.get('summary', '')),
+                    metadata=DocumentMetadata(
+                        source=result.get('company_name', 'Unknown'),
+                        created_at="",
+                        author="",
+                        language="chinese"
+                    )
+                )
+                retrieved_documents.append(doc)
+                retriever_scores.append(result.get('combined_score', 0.0))
+            
+            print(f"✅ 多阶段检索完成，找到 {len(retrieved_documents)} 条结果")
+            
+            # 生成答案
+            if retrieved_documents:
+                # 构建上下文
+                context_str = "\n\n".join([doc.content for doc in retrieved_documents[:10]])
+                
+                # 使用中文prompt模板
+                from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_ZH
+                prompt = PROMPT_TEMPLATE_ZH.format(context=context_str, question=question)
+                
+                # 生成答案
+                generated_responses = self.rag_system.generator.generate(texts=[prompt])
+                answer = generated_responses[0] if generated_responses else "Unable to generate answer"
+                
+                # 准备上下文数据
+                context_data = []
+                for doc, score in zip(retrieved_documents[:20], retriever_scores[:20]):
+                    context_data.append([f"{score:.4f}", doc.content[:500] + "..." if len(doc.content) > 500 else doc.content])
+                
+                # 添加检索系统信息
+                answer = f"[Multi-Stage Retrieval: ZH] {answer}"
+                
+                return answer, context_data, None
+            else:
+                return "No relevant documents found.", [], None
+                
+        except Exception as e:
+            print(f"❌ 多阶段检索失败: {e}")
+            print("回退到传统检索...")
+            return self._process_with_traditional_rag(question, 'zh', reranker_checkbox)
+    
+    def _process_with_traditional_rag(self, question: str, language: str, reranker_checkbox: bool) -> tuple[str, List[List[str]], Optional[gr.Plot]]:
+        """使用传统RAG系统处理查询"""
         # 根据数据源选择决定是否使用重排序器
         use_reranker = reranker_checkbox and self.enable_reranker and self.reranker is not None
         
@@ -488,6 +632,7 @@ class OptimizedRagUI:
         def is_chinese(text):
             return len(re.findall(r'[\u4e00-\u9fff]', text)) > max(1, len(text) // 6)
         try:
+            from langdetect import detect
             lang = detect(question)
             # 修正：如果检测为韩文但内容明显是中文，强制设为中文
             if lang == 'ko' and is_chinese(question):
@@ -545,7 +690,6 @@ class OptimizedRagUI:
         print(f"\n=== DEBUG INFO ===")
         print(f"Question language: {lang}")
         print(f"Data source: {detected_data_source}")
-        print(f"User selected data source: {datasource}")
         print(f"Prompt template used: {rag_output.metadata.get('prompt_template', 'Unknown')}")
         print(f"Generated response: {answer[:200]}...")  # 只打印前200个字符
         print(f"=== END DEBUG ===\n")

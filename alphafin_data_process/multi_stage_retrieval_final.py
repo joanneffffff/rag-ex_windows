@@ -41,7 +41,7 @@ class MultiStageRetrievalSystem:
     
     def __init__(self, data_path: Path, dataset_type: str = "chinese", use_existing_config: bool = True):
         """
-        初始化检索系统
+        初始化多阶段检索系统
         
         Args:
             data_path: 数据文件路径
@@ -49,66 +49,106 @@ class MultiStageRetrievalSystem:
             use_existing_config: 是否使用现有配置
         """
         self.data_path = data_path
-        self.dataset_type = dataset_type.lower()
+        self.dataset_type = dataset_type
         self.data = []
-        self.metadata_index = {}  # 元数据索引（仅中文数据）
-        self.faiss_index = None
+        self.original_data = []
+        self.doc_to_chunks_mapping = {}
+        
+        # 初始化组件
         self.embedding_model = None
+        self.faiss_index = None
         self.qwen_reranker = None
-        self.contexts_for_rerank = []
+        self.llm_generator = None  # 添加LLM生成器
+        self.valid_indices = []
+        self.metadata_index = defaultdict(dict)
         
-        # 使用现有配置
+        # 配置
+        self.config = None
+        self.model_name = "all-MiniLM-L6-v2"
+        
         if use_existing_config:
-            self.config = Config()
-            print("使用现有配置初始化多阶段检索系统")
-        else:
-            self.config = None
-            print("使用默认配置初始化多阶段检索系统")
-        
-        # 根据数据集类型选择编码器（使用现有配置）
-        if use_existing_config and self.config:
-            if self.dataset_type == "chinese":
-                # 使用现有的中文微调模型 - 转换为绝对路径
-                model_path = self.config.encoder.chinese_model_path
-                if not Path(model_path).is_absolute():
-                    # 如果是相对路径，转换为绝对路径
-                    model_path = str(Path(__file__).parent.parent / model_path)
-                self.model_name = model_path
-                print(f"使用现有中文编码器: {self.model_name}")
-            else:  # english
-                # 使用现有的英文微调模型 - 转换为绝对路径
-                model_path = self.config.encoder.english_model_path
-                if not Path(model_path).is_absolute():
-                    # 如果是相对路径，转换为绝对路径
-                    model_path = str(Path(__file__).parent.parent / model_path)
-                self.model_name = model_path
-                print(f"使用现有英文编码器: {self.model_name}")
-        else:
-            # 回退到默认模型
-            if self.dataset_type == "chinese":
-                self.model_name = "distiluse-base-multilingual-cased-v2"
-            else:
-                self.model_name = "all-MiniLM-L6-v2"
-            print(f"使用默认编码器: {self.model_name}")
+            try:
+                from config.parameters import Config
+                self.config = Config()
+                
+                # 根据数据集类型选择编码器
+                if self.dataset_type == "chinese":
+                    # 使用中文编码器
+                    self.model_name = self.config.encoder.chinese_model_path
+                    print(f"使用中文编码器: {self.model_name}")
+                else:
+                    # 使用英文编码器
+                    self.model_name = self.config.encoder.english_model_path
+                    print(f"使用英文编码器: {self.model_name}")
+                
+                print("使用现有配置初始化多阶段检索系统")
+            except Exception as e:
+                print(f"加载配置失败: {e}")
+                # 回退到默认模型
+                if self.dataset_type == "chinese":
+                    self.model_name = "distiluse-base-multilingual-cased-v2"
+                    print(f"使用默认中文编码器: {self.model_name}")
+                else:
+                    self.model_name = "all-MiniLM-L6-v2"
+                    print(f"使用默认英文编码器: {self.model_name}")
         
         # 加载数据
         self._load_data()
-        # 构建元数据索引（仅中文数据）
-        if self.dataset_type == "chinese":
-            self._build_metadata_index()
-        # 初始化嵌入模型
+        
+        # 构建索引
+        self._build_metadata_index()
         self._init_embedding_model()
-        # 构建FAISS索引
         self._build_faiss_index()
-        # 初始化Qwen reranker
         self._init_qwen_reranker()
+        self._init_llm_generator()  # 初始化LLM生成器
     
     def _load_data(self):
         """加载数据"""
         print("正在加载数据...")
+        
+        # 加载原始AlphaFin数据用于FAISS索引
+        print("加载原始AlphaFin数据用于FAISS索引...")
         with open(self.data_path, 'r', encoding='utf-8') as f:
-            self.data = json.load(f)
-        print(f"加载了 {len(self.data)} 条记录")
+            self.original_data = json.load(f)
+        print(f"加载了 {len(self.original_data)} 条原始记录")
+        
+        # 建立doc_id到chunks的映射
+        print("建立doc_id到chunks的映射关系...")
+        self.doc_to_chunks_mapping = {}
+        
+        for doc_idx, record in enumerate(self.original_data):
+            if self.dataset_type == "chinese":
+                # 对于中文数据，生成chunks
+                original_context = record.get('original_context', '')
+                company_name = record.get('company_name', '公司')
+                
+                if original_context:
+                    # 使用convert_json_context_to_natural_language_chunks函数
+                    from xlm.utils.optimized_data_loader import convert_json_context_to_natural_language_chunks
+                    chunks = convert_json_context_to_natural_language_chunks(original_context, company_name)
+                    
+                    if chunks:
+                        self.doc_to_chunks_mapping[doc_idx] = chunks
+                    else:
+                        # 如果没有chunks，使用summary作为fallback
+                        self.doc_to_chunks_mapping[doc_idx] = [record.get('summary', '')]
+                else:
+                    # 如果没有original_context，使用summary
+                    self.doc_to_chunks_mapping[doc_idx] = [record.get('summary', '')]
+            else:
+                # 英文数据，使用context或content
+                context = record.get('context', '') or record.get('content', '')
+                self.doc_to_chunks_mapping[doc_idx] = [context]
+        
+        print(f"建立了 {len(self.doc_to_chunks_mapping)} 个doc_id到chunks的映射")
+        
+        # 统计chunks总数
+        total_chunks = sum(len(chunks) for chunks in self.doc_to_chunks_mapping.values())
+        print(f"总共生成了 {total_chunks} 个chunks用于重排序")
+        
+        # 使用原始数据作为主要数据
+        self.data = self.original_data
+        
         print(f"数据集类型: {self.dataset_type}")
         
         # 检查数据格式
@@ -129,54 +169,62 @@ class MultiStageRetrievalSystem:
         print("正在构建元数据索引...")
         
         # 检查是否有元数据字段
-        if not self.data or not isinstance(self.data[0], dict):
+        if not self.data:
             print("数据格式不支持元数据索引")
             return
             
-        sample_record = self.data[0]
-        has_metadata = any(field in sample_record for field in ['company_name', 'stock_code', 'report_date'])
-        
-        if not has_metadata:
-            print("数据不包含元数据字段，跳过元数据索引构建")
+        # 检查数据格式
+        if hasattr(self.data[0], 'content'):
+            # DocumentWithMetadata格式
+            print("使用DocumentWithMetadata格式，跳过元数据索引构建")
+            print("注意：chunk级别的数据不支持元数据预过滤")
             return
-        
-        # 按公司名称索引
-        self.metadata_index['company_name'] = defaultdict(list)
-        # 按股票代码索引
-        self.metadata_index['stock_code'] = defaultdict(list)
-        # 按报告日期索引
-        self.metadata_index['report_date'] = defaultdict(list)
-        # 按公司名称+股票代码组合索引
-        self.metadata_index['company_stock'] = defaultdict(list)
-        
-        for idx, record in enumerate(self.data):
-            # 公司名称索引
-            if record.get('company_name'):
-                company_name = record['company_name'].strip().lower()
-                self.metadata_index['company_name'][company_name].append(idx)
+        elif isinstance(self.data[0], dict):
+            # 字典格式
+            sample_record = self.data[0]
+            has_metadata = any(field in sample_record for field in ['company_name', 'stock_code', 'report_date'])
             
-            # 股票代码索引
-            if record.get('stock_code'):
-                stock_code = str(record['stock_code']).strip().lower()
-                self.metadata_index['stock_code'][stock_code].append(idx)
+            if not has_metadata:
+                print("数据不包含元数据字段，跳过元数据索引构建")
+                return
             
-            # 报告日期索引
-            if record.get('report_date'):
-                report_date = record['report_date'].strip()
-                self.metadata_index['report_date'][report_date].append(idx)
+            # 按公司名称索引
+            self.metadata_index['company_name'] = defaultdict(list)
+            # 按股票代码索引
+            self.metadata_index['stock_code'] = defaultdict(list)
+            # 按报告日期索引
+            self.metadata_index['report_date'] = defaultdict(list)
+            # 按公司名称+股票代码组合索引
+            self.metadata_index['company_stock'] = defaultdict(list)
             
-            # 公司名称+股票代码组合索引
-            if record.get('company_name') and record.get('stock_code'):
-                company_name = record['company_name'].strip().lower()
-                stock_code = str(record['stock_code']).strip().lower()
-                key = f"{company_name}_{stock_code}"
-                self.metadata_index['company_stock'][key].append(idx)
-        
-        print(f"元数据索引构建完成:")
-        print(f"  - 公司名称: {len(self.metadata_index['company_name'])} 个")
-        print(f"  - 股票代码: {len(self.metadata_index['stock_code'])} 个")
-        print(f"  - 报告日期: {len(self.metadata_index['report_date'])} 个")
-        print(f"  - 公司+股票组合: {len(self.metadata_index['company_stock'])} 个")
+            for idx, record in enumerate(self.data):
+                # 公司名称索引
+                if record.get('company_name'):
+                    company_name = record['company_name'].strip().lower()
+                    self.metadata_index['company_name'][company_name].append(idx)
+                
+                # 股票代码索引
+                if record.get('stock_code'):
+                    stock_code = str(record['stock_code']).strip().lower()
+                    self.metadata_index['stock_code'][stock_code].append(idx)
+                
+                # 报告日期索引
+                if record.get('report_date'):
+                    report_date = record['report_date'].strip()
+                    self.metadata_index['report_date'][report_date].append(idx)
+                
+                # 公司名称+股票代码组合索引
+                if record.get('company_name') and record.get('stock_code'):
+                    company_name = record['company_name'].strip().lower()
+                    stock_code = str(record['stock_code']).strip().lower()
+                    key = f"{company_name}_{stock_code}"
+                    self.metadata_index['company_stock'][key].append(idx)
+            
+            print(f"元数据索引构建完成:")
+            print(f"  - 公司名称: {len(self.metadata_index['company_name'])} 个")
+            print(f"  - 股票代码: {len(self.metadata_index['stock_code'])} 个")
+            print(f"  - 报告日期: {len(self.metadata_index['report_date'])} 个")
+            print(f"  - 公司+股票组合: {len(self.metadata_index['company_stock'])} 个")
     
     def _init_embedding_model(self):
         """初始化句子嵌入模型"""
@@ -190,8 +238,24 @@ class MultiStageRetrievalSystem:
             print(f"使用配置的缓存目录: {cache_dir}")
         
         try:
-            self.embedding_model = SentenceTransformer(self.model_name, cache_folder=cache_dir)
-            print("嵌入模型加载完成")
+            # 检查是否是微调模型路径
+            if "finetuned" in self.model_name or "models/" in self.model_name:
+                print("检测到微调模型，使用FinbertEncoder...")
+                from xlm.components.encoder.finbert import FinbertEncoder
+                self.embedding_model = FinbertEncoder(
+                    model_name=self.model_name,
+                    cache_dir=cache_dir,
+                    device="cuda:0"  # 编码器使用cuda:0
+                )
+                print("微调模型加载完成 (cuda:0)")
+            else:
+                # 使用SentenceTransformer加载HuggingFace模型
+                from sentence_transformers import SentenceTransformer
+                self.embedding_model = SentenceTransformer(self.model_name, cache_folder=cache_dir)
+                # 将模型移动到cuda:0
+                if hasattr(self.embedding_model, 'to'):
+                    self.embedding_model.to('cuda:0')
+                print("HuggingFace模型加载完成 (cuda:0)")
         except Exception as e:
             print(f"嵌入模型加载失败: {e}")
             print("尝试使用默认模型...")
@@ -202,8 +266,12 @@ class MultiStageRetrievalSystem:
                 else:
                     fallback_model = "all-MiniLM-L6-v2"
                 print(f"使用回退模型: {fallback_model}")
+                from sentence_transformers import SentenceTransformer
                 self.embedding_model = SentenceTransformer(fallback_model)
-                print("回退模型加载成功")
+                # 将模型移动到cuda:0
+                if hasattr(self.embedding_model, 'to'):
+                    self.embedding_model.to('cuda:0')
+                print("回退模型加载成功 (cuda:0)")
             except Exception as e2:
                 print(f"回退模型也加载失败: {e2}")
                 self.embedding_model = None
@@ -215,6 +283,8 @@ class MultiStageRetrievalSystem:
             return
             
         print("正在构建FAISS索引...")
+        print("中文数据：使用summary字段进行向量编码")
+        print("英文数据：使用context/content字段进行向量编码")
         
         # 准备用于嵌入的文本
         texts_for_embedding = []
@@ -223,15 +293,10 @@ class MultiStageRetrievalSystem:
         for idx, record in enumerate(self.data):
             # 根据数据集类型选择不同的文本组合策略
             if self.dataset_type == "chinese":
-                # 中文数据：组合generated_question和summary
-                question = record.get('generated_question', '')
+                # 中文数据：只使用summary
                 summary = record.get('summary', '')
                 
-                if question and summary:
-                    combined_text = f"Question: {question} Summary: {summary}"
-                    texts_for_embedding.append(combined_text)
-                    valid_indices.append(idx)
-                elif summary:  # 如果没有generated_question，只用summary
+                if summary:
                     texts_for_embedding.append(summary)
                     valid_indices.append(idx)
                 else:
@@ -239,6 +304,7 @@ class MultiStageRetrievalSystem:
             else:
                 # 英文数据：使用context或content字段
                 context = record.get('context', '') or record.get('content', '')
+                
                 if context:
                     texts_for_embedding.append(context)
                     valid_indices.append(idx)
@@ -246,35 +312,24 @@ class MultiStageRetrievalSystem:
                     continue
         
         if not texts_for_embedding:
-            print("警告：没有找到有效的文本用于嵌入")
+            print("没有有效的文本用于嵌入")
             return
         
-        # 生成嵌入向量
-        print(f"正在为 {len(texts_for_embedding)} 条记录生成嵌入向量...")
-        try:
-            # 使用配置的批处理大小
-            batch_size = 32
-            if self.config:
-                batch_size = self.config.encoder.batch_size
-            
-            embeddings = self.embedding_model.encode(
-                texts_for_embedding, 
-                show_progress_bar=True,
-                batch_size=batch_size
-            )
-            
-            # 创建FAISS索引
-            dimension = embeddings.shape[1]
-            self.faiss_index = faiss.IndexFlatIP(dimension)  # 使用内积相似度
-            self.faiss_index.add(embeddings.astype('float32'))
-            
-            # 保存有效索引的映射
-            self.valid_indices = valid_indices
-            
-            print(f"FAISS索引构建完成，维度: {dimension}")
-        except Exception as e:
-            print(f"FAISS索引构建失败: {e}")
-            self.faiss_index = None
+        # 生成嵌入
+        print(f"正在编码 {len(texts_for_embedding)} 个文本...")
+        embeddings = self.embedding_model.encode(texts_for_embedding, show_progress_bar=True)
+        
+        # 构建FAISS索引
+        dimension = embeddings.shape[1]
+        self.faiss_index = faiss.IndexFlatIP(dimension)  # 使用内积相似度
+        self.faiss_index.add(embeddings.astype('float32'))
+        
+        # 保存有效索引的映射
+        self.valid_indices = valid_indices
+        
+        print(f"FAISS索引构建完成，维度: {dimension}")
+        print(f"有效索引数量: {len(self.valid_indices)}")
+        print(f"基于summary构建索引，用于粗粒度检索")
     
     def _init_qwen_reranker(self):
         """初始化Qwen reranker"""
@@ -299,15 +354,49 @@ class MultiStageRetrievalSystem:
             # 使用现有的QwenReranker
             self.qwen_reranker = QwenReranker(
                 model_name=model_name,
-                device="cuda" if torch.cuda.is_available() else "cpu",
+                device="cuda:0",  # 重排序器使用cuda:0
                 cache_dir=cache_dir,
                 use_quantization=use_quantization,
                 quantization_type=quantization_type
             )
-            print("Qwen reranker初始化完成")
+            print("Qwen reranker初始化完成 (cuda:0)")
         except Exception as e:
             print(f"Qwen reranker初始化失败: {e}")
             self.qwen_reranker = None
+    
+    def _init_llm_generator(self):
+        """初始化LLM生成器"""
+        print("正在初始化LLM生成器...")
+        try:
+            # 重用现有的LocalLLMGenerator
+            from xlm.components.generator.local_llm_generator import LocalLLMGenerator
+            
+            # 使用配置中的参数
+            model_name = None  # 让LocalLLMGenerator从config读取
+            cache_dir = None   # 让LocalLLMGenerator从config读取
+            device = "cuda:1"  # 生成器使用cuda:1
+            use_quantization = None  # 让LocalLLMGenerator从config读取
+            quantization_type = None  # 让LocalLLMGenerator从config读取
+            
+            if self.config:
+                # 如果config中有generator配置，使用它
+                if hasattr(self.config, 'generator'):
+                    model_name = self.config.generator.model_name
+                    cache_dir = self.config.generator.cache_dir
+                    use_quantization = self.config.generator.use_quantization
+                    quantization_type = self.config.generator.quantization_type
+            
+            self.llm_generator = LocalLLMGenerator(
+                model_name=model_name,
+                cache_dir=cache_dir,
+                device=device,
+                use_quantization=use_quantization,
+                quantization_type=quantization_type
+            )
+            print("LLM生成器初始化完成")
+        except Exception as e:
+            print(f"LLM生成器初始化失败: {e}")
+            self.llm_generator = None
     
     def pre_filter(self, 
                    company_name: Optional[str] = None,
@@ -430,31 +519,70 @@ class MultiStageRetrievalSystem:
         
         print(f"开始重排序 {len(candidate_results)} 条候选结果...")
         
-        # 准备重排序的文档
+        # 准备重排序的文档 - 使用doc_id到chunks的映射
         docs_for_rerank = []
+        doc_to_rerank_mapping = []  # 记录重排序结果到原始doc_id的映射
+        
         for doc_idx, faiss_score in candidate_results:
-            if doc_idx < len(self.contexts_for_rerank):
-                docs_for_rerank.append(self.contexts_for_rerank[doc_idx])
+            # 从映射中找到对应的chunks
+            if doc_idx in self.doc_to_chunks_mapping:
+                chunks = self.doc_to_chunks_mapping[doc_idx]
+                
+                # 对每个chunk进行重排序
+                for chunk_idx, chunk_content in enumerate(chunks):
+                    if chunk_content.strip():  # 跳过空chunk
+                        docs_for_rerank.append(chunk_content)
+                        doc_to_rerank_mapping.append((doc_idx, chunk_idx))
             else:
-                print(f"警告: 文档索引 {doc_idx} 超出范围")
-                docs_for_rerank.append("")
+                # 如果找不到映射，使用原始数据
+                if doc_idx < len(self.data):
+                    record = self.data[doc_idx]
+                    if self.dataset_type == "chinese":
+                        content = record.get('summary', '')
+                    else:
+                        content = record.get('context', '') or record.get('content', '')
+                    docs_for_rerank.append(content)
+                    doc_to_rerank_mapping.append((doc_idx, -1))
+                else:
+                    docs_for_rerank.append("")
+                    doc_to_rerank_mapping.append((doc_idx, -1))
+        
+        if not docs_for_rerank:
+            print("没有有效的文档用于重排序")
+            return [(idx, score, 0.0) for idx, score in candidate_results[:top_k]]
         
         try:
-            # 使用较小的批处理大小以减少内存使用
+            # 使用合理的批处理大小
             reranked_docs = self.qwen_reranker.rerank(
                 query=query,
                 documents=docs_for_rerank,
-                batch_size=1  # 使用最小批处理大小
+                batch_size=4  # 增加到4，避免batch_size=1的问题
             )
             
             print(f"Qwen重排序结果: {len(reranked_docs)} 条记录")
             
-            # 组合结果
-            results = []
+            # 组合结果，按doc_id分组，取最高分
+            doc_scores = {}
             for i, (doc_content, reranker_score) in enumerate(reranked_docs):
-                if i < len(candidate_results):
-                    doc_idx, faiss_score = candidate_results[i]
+                if i < len(doc_to_rerank_mapping):
+                    doc_idx, chunk_idx = doc_to_rerank_mapping[i]
+                    
+                    # 为每个doc_id记录最高分
+                    if doc_idx not in doc_scores or reranker_score > doc_scores[doc_idx]['score']:
+                        doc_scores[doc_idx] = {
+                            'score': reranker_score,
+                            'chunk_idx': chunk_idx
+                        }
+            
+            # 组合FAISS分数和重排序分数
+            results = []
+            for doc_idx, faiss_score in candidate_results:
+                if doc_idx in doc_scores:
+                    reranker_score = doc_scores[doc_idx]['score']
                     results.append((doc_idx, faiss_score, reranker_score))
+                else:
+                    # 如果没有重排序分数，使用0
+                    results.append((doc_idx, faiss_score, 0.0))
             
             # 按重排序分数降序排序
             results.sort(key=lambda x: x[2], reverse=True)
@@ -467,12 +595,72 @@ class MultiStageRetrievalSystem:
             # 回退到FAISS分数排序
             return [(idx, score, 0.0) for idx, score in candidate_results[:top_k]]
     
+    def generate_answer(self, query: str, candidate_results: List[Tuple[int, float, float]], top_k_for_context: int = 5) -> str:
+        """
+        生成LLM答案 - 将重排序后的Top-K1个chunks拼接作为上下文
+        
+        Args:
+            query: 查询文本
+            candidate_results: 候选结果列表 [(doc_idx, faiss_score, reranker_score), ...]
+            top_k_for_context: 用于生成上下文的候选数量
+            
+        Returns:
+            生成的LLM答案
+        """
+        if not candidate_results:
+            print("没有候选结果，无法生成答案")
+            return ""
+        
+        print(f"开始生成LLM答案...")
+        
+        # 获取重排序后的Top-K1个文档的chunks
+        top_chunks = []
+        for doc_idx, faiss_score, reranker_score in candidate_results[:top_k_for_context]:
+            if doc_idx in self.doc_to_chunks_mapping:
+                chunks = self.doc_to_chunks_mapping[doc_idx]
+                # 添加所有chunks
+                top_chunks.extend(chunks)
+            else:
+                # 如果找不到映射，使用原始数据
+                if doc_idx < len(self.data):
+                    record = self.data[doc_idx]
+                    if self.dataset_type == "chinese":
+                        content = record.get('summary', '')
+                    else:
+                        content = record.get('context', '') or record.get('content', '')
+                    top_chunks.append(content)
+        
+        # 拼接chunks作为上下文
+        context = "\n\n".join([chunk for chunk in top_chunks if chunk.strip()])
+        
+        print(f"上下文长度: {len(context)} 个字符")
+        print(f"使用了 {len(top_chunks)} 个chunks")
+        
+        # 使用LLM生成器生成答案
+        if self.llm_generator:
+            try:
+                # 构建prompt
+                prompt = f"基于以下上下文信息，回答用户的问题。\n\n上下文：{context}\n\n问题：{query}\n\n回答："
+                
+                # 使用LocalLLMGenerator的generate方法
+                generated_texts = self.llm_generator.generate([prompt])
+                answer = generated_texts[0] if generated_texts else "抱歉，无法生成答案。"
+            except Exception as e:
+                print(f"LLM生成失败: {e}")
+                answer = f"抱歉，生成答案时出现错误：{str(e)}"
+        else:
+            # 回退到默认的简单模板回答
+            answer = f"基于检索到的信息，我可以回答您的问题：{query}\n\n相关上下文：{context[:500]}...\n\n这是一个基于检索结果的回答。"
+        
+        print(f"LLM答案生成完成")
+        return answer
+    
     def search(self, 
                query: str,
                company_name: Optional[str] = None,
                stock_code: Optional[str] = None,
                report_date: Optional[str] = None,
-               top_k: int = 20) -> List[Dict]:
+               top_k: int = 20) -> Dict:
         """
         完整的多阶段检索流程
         
@@ -517,41 +705,73 @@ class MultiStageRetrievalSystem:
         # 3. Qwen Reranker
         final_results = self.rerank(query, faiss_results, top_k=rerank_top_k)
         
-        # 4. 格式化结果
+        # 4. LLM答案生成 - 将重排序后的Top-K1个chunks拼接作为上下文
+        llm_answer = self.generate_answer(query, final_results, top_k_for_context=5)
+        
+        # 5. 格式化结果
         formatted_results = []
         for idx, faiss_score, combined_score in final_results:
             record = self.data[idx]
             
             # 根据数据集类型选择不同的字段
-            if self.dataset_type == "chinese":
+            if hasattr(record, 'content'):
+                # DocumentWithMetadata格式
                 result = {
                     'index': idx,
                     'faiss_score': faiss_score,
                     'combined_score': combined_score,
-                    'company_name': record.get('company_name'),
-                    'stock_code': record.get('stock_code'),
-                    'report_date': record.get('report_date'),
-                    'original_context': record.get('original_context', '')[:200] + '...' if len(record.get('original_context', '')) > 200 else record.get('original_context', ''),
-                    'summary': record.get('summary', '')[:200] + '...' if len(record.get('summary', '')) > 200 else record.get('summary', ''),
-                    'generated_question': record.get('generated_question', ''),
-                    'original_question': record.get('original_question', ''),
-                    'original_answer': record.get('original_answer', '')
+                    'content': record.content[:200] + '...' if len(record.content) > 200 else record.content,
+                    'source': record.metadata.source if hasattr(record.metadata, 'source') else 'unknown',
+                    'language': record.metadata.language if hasattr(record.metadata, 'language') else 'unknown'
                 }
+            elif isinstance(record, dict):
+                # 字典格式（兼容旧格式）
+                if self.dataset_type == "chinese":
+                    result = {
+                        'index': idx,
+                        'faiss_score': faiss_score,
+                        'combined_score': combined_score,
+                        'company_name': record.get('company_name'),
+                        'stock_code': record.get('stock_code'),
+                        'report_date': record.get('report_date'),
+                        'original_context': record.get('original_context', ''),  # 返回完整的original_context
+                        'summary': record.get('summary', '')[:200] + '...' if len(record.get('summary', '')) > 200 else record.get('summary', ''),
+                        'generated_question': record.get('generated_question', ''),
+                        'original_question': record.get('original_question', ''),
+                        'original_answer': record.get('original_answer', '')
+                    }
+                else:
+                    result = {
+                        'index': idx,
+                        'faiss_score': faiss_score,
+                        'combined_score': combined_score,
+                        'context': record.get('context', '')[:200] + '...' if len(record.get('context', '')) > 200 else record.get('context', ''),
+                        'content': record.get('content', '')[:200] + '...' if len(record.get('content', '')) > 200 else record.get('content', ''),
+                        'uid': record.get('uid', ''),
+                        'source': record.get('source', '')
+                    }
             else:
+                # 其他格式
                 result = {
                     'index': idx,
                     'faiss_score': faiss_score,
                     'combined_score': combined_score,
-                    'context': record.get('context', '')[:200] + '...' if len(record.get('context', '')) > 200 else record.get('context', ''),
-                    'content': record.get('content', '')[:200] + '...' if len(record.get('content', '')) > 200 else record.get('content', ''),
-                    'uid': record.get('uid', ''),
-                    'source': record.get('source', '')
+                    'content': str(record)[:200] + '...' if len(str(record)) > 200 else str(record)
                 }
             
             formatted_results.append(result)
         
+        # 添加LLM生成的答案到结果中
+        final_output = {
+            'retrieved_documents': formatted_results,
+            'llm_answer': llm_answer,
+            'query': query,
+            'total_documents': len(formatted_results)
+        }
+        
         print(f"检索完成，返回 {len(formatted_results)} 条结果")
-        return formatted_results
+        print(f"LLM答案生成完成")
+        return final_output
     
     def save_index(self, output_dir: Path):
         """保存索引到文件"""
@@ -636,7 +856,7 @@ def main():
         top_k=5
     )
     
-    for i, result in enumerate(results1):
+    for i, result in enumerate(results1['retrieved_documents']):
         print(f"\n结果 {i+1}:")
         print(f"  公司: {result['company_name']}")
         print(f"  股票代码: {result['stock_code']}")
@@ -650,7 +870,7 @@ def main():
         top_k=5
     )
     
-    for i, result in enumerate(results2):
+    for i, result in enumerate(results2['retrieved_documents']):
         print(f"\n结果 {i+1}:")
         print(f"  公司: {result['company_name']}")
         print(f"  股票代码: {result['stock_code']}")

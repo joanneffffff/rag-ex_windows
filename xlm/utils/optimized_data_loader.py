@@ -311,18 +311,59 @@ class OptimizedDataLoader:
                             alphafin_docs.append(alphafin_doc)
                     else:
                         # 使用原有的chunk级别处理
-                        doc_metadata = DocumentMetadata(
-                            source=metadata.get('source', 'alphafin'),
-                            created_at=metadata.get('created_at', ''),
-                            author=metadata.get('author', ''),
-                            language="chinese"
-                        )
-                        
-                        doc = DocumentWithMetadata(
-                            content=content,
-                            metadata=doc_metadata
-                        )
-                        alphafin_docs.append(doc)
+                        # 对于AlphaFin数据，需要将JSON context转换为自然语言chunks
+                        if 'original_context' in record:
+                            # 使用convert_json_context_to_natural_language_chunks函数
+                            company_name = record.get('company_name', '公司')
+                            json_context = record.get('original_context', '')
+                            
+                            if json_context:
+                                # 转换为自然语言chunks
+                                natural_chunks = convert_json_context_to_natural_language_chunks(
+                                    json_context, company_name
+                                )
+                                
+                                for i, chunk_content in enumerate(natural_chunks):
+                                    chunk_metadata = DocumentMetadata(
+                                        source=f"{metadata.get('source', 'alphafin')}_chunk_{i}",
+                                        created_at=metadata.get('created_at', ''),
+                                        author=metadata.get('author', ''),
+                                        language="chinese"
+                                    )
+                                    
+                                    chunk_doc = DocumentWithMetadata(
+                                        content=chunk_content,
+                                        metadata=chunk_metadata
+                                    )
+                                    alphafin_docs.append(chunk_doc)
+                            else:
+                                # 如果没有original_context，使用其他字段
+                                doc_metadata = DocumentMetadata(
+                                    source=metadata.get('source', 'alphafin'),
+                                    created_at=metadata.get('created_at', ''),
+                                    author=metadata.get('author', ''),
+                                    language="chinese"
+                                )
+                                
+                                doc = DocumentWithMetadata(
+                                    content=content,
+                                    metadata=doc_metadata
+                                )
+                                alphafin_docs.append(doc)
+                        else:
+                            # 没有original_context字段，直接使用内容
+                            doc_metadata = DocumentMetadata(
+                                source=metadata.get('source', 'alphafin'),
+                                created_at=metadata.get('created_at', ''),
+                                author=metadata.get('author', ''),
+                                language="chinese"
+                            )
+                            
+                            doc = DocumentWithMetadata(
+                                content=content,
+                                metadata=doc_metadata
+                            )
+                            alphafin_docs.append(doc)
         
         except Exception as e:
             self.logger.error(f"Error loading optimized AlphaFin data: {str(e)}")
