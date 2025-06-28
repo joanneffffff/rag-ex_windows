@@ -89,7 +89,7 @@ class GeneratorConfig:
     # 模型特定配置 - 大幅增加token数以获得完整答案，使用4bit量化节省内存
     use_quantization: bool = True  # 是否使用量化
     quantization_type: str = "4bit"  # 改为4bit量化以节省GPU内存
-    max_new_tokens: int = 300  # 大幅增加到300，给模型足够空间生成完整答案
+    max_new_tokens: int = 600  # 大幅增加到600，给模型足够空间生成完整答案
     temperature: float = 0.2  # 降低温度，获得更稳定的回答
     top_p: float = 0.8  # 进一步降低top-p，减少冗长
     do_sample: bool = True  # 是否使用采样

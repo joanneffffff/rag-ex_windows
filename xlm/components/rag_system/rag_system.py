@@ -9,6 +9,8 @@ from langdetect import detect, LangDetectException
 # Define the robust "Golden Prompts" directly in the code
 PROMPT_TEMPLATE_EN = """You are a highly analytical and precise financial expert. Your task is to answer the user's question **strictly based on the provided <context> information**.
 
+**CRITICAL: Your output must be a pure, direct answer. Do NOT include any self-reflection, thinking process, prompt analysis, irrelevant comments, format markers (like \boxed{}, numbered lists, bold text), or any form of meta-commentary. Do NOT quote or restate the prompt content. Your answer must end directly and concisely without any follow-up explanations.**
+
 Requirements:
 1.  **Strictly adhere to the provided <context>. Do not use any external knowledge or make assumptions.**
 2.  If the <context> does not contain sufficient information to answer the question, state: "The answer cannot be found in the provided context."
@@ -34,13 +36,30 @@ Question: {question}
 Answer:"""
 
 # 超简洁版本（推荐用于生产环境）
-PROMPT_TEMPLATE_ZH_SIMPLE = """基于上下文信息，用一句话回答用户问题。
+PROMPT_TEMPLATE_ZH_SIMPLE = """基于上下文信息，用一句话回答用户问题。不要添加任何格式标记、编号或额外说明。
+
+**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 \boxed{}、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
+
+上下文：{context}
+问题：{question}
+回答："""
+
+# 简洁版本（平衡质量和长度）
+PROMPT_TEMPLATE_ZH_CLEAN = """基于以下上下文信息，直接回答用户问题。要求：
+1. 只使用提供的信息
+2. 回答要简洁，不超过100字
+3. 不要添加任何格式标记、编号或额外说明
+4. 用自然的中文表达
+
+**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 \boxed{}、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
 
 上下文：{context}
 问题：{question}
 回答："""
 
 PROMPT_TEMPLATE_ZH = """基于以下上下文信息，直接回答用户问题。只使用提供的信息，不要添加任何外部知识或格式化内容。
+
+**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 \\boxed{{}}、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
 
 示例1：
 上下文：中国平安2023年第一季度实现营业收入2,345.67亿元，同比增长8.5%；净利润为156.78亿元，同比增长12.3%。
@@ -61,6 +80,8 @@ PROMPT_TEMPLATE_ZH = """基于以下上下文信息，直接回答用户问题�
 
 # Chain-of-Thought版本（优化版，隐藏思考过程）
 PROMPT_TEMPLATE_ZH_COT = """你是一位专业的金融分析师。请基于以下上下文信息，通过内部思考来回答用户问题。
+
+**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 \boxed{}、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
 
 重要要求：
 1. 请进行内部思考，但不要输出任何思考步骤或过程
@@ -117,7 +138,8 @@ class RagSystem:
             elif self.use_cot:
                 prompt_template = PROMPT_TEMPLATE_ZH_COT
             else:
-                prompt_template = PROMPT_TEMPLATE_ZH
+                # 默认使用简洁版本
+                prompt_template = PROMPT_TEMPLATE_ZH_CLEAN
             no_context_message = "未找到合适的语料，请检查数据源。"
         else:
             prompt_template = PROMPT_TEMPLATE_EN
