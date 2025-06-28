@@ -24,10 +24,8 @@ RERANKER_CACHE_DIR = DEFAULT_CACHE_DIR
 
 @dataclass
 class EncoderConfig:
-    # 默认使用多语言模型，支持中英文
-    # model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     # 中文微调模型路径
-    chinese_model_path: str = "models/finetuned_alphafin_zh"
+    chinese_model_path: str = "models/finetuned_alphafin_zh_optimized"
     # 英文微调模型路径
     english_model_path: str = "models/finetuned_finbert_tatqa"
     cache_dir: str = EMBEDDING_CACHE_DIR
@@ -41,7 +39,7 @@ class RerankerConfig:
     cache_dir: str = RERANKER_CACHE_DIR
     device: Optional[str] = None  # Will auto-detect if None
     use_quantization: bool = True
-    quantization_type: str = "8bit"  # "8bit" or "4bit"
+    quantization_type: str = "4bit"  # 改为4bit量化以节省GPU内存
     batch_size: int = 4
     enabled: bool = True  # 是否启用重排序器
 
@@ -88,14 +86,14 @@ class GeneratorConfig:
     model_name: str = "SUFE-AIFLM-Lab/Fin-R1"  # 上海财经大学金融推理大模型，专门针对金融领域优化
     cache_dir: str = GENERATOR_CACHE_DIR
     
-    # 模型特定配置
+    # 模型特定配置 - 大幅增加token数以获得完整答案，使用4bit量化节省内存
     use_quantization: bool = True  # 是否使用量化
-    quantization_type: str = "8bit"  # "8bit" or "4bit"
-    max_new_tokens: int = 512  # 增加token数确保句子完整，同时保持简洁
-    temperature: float = 0.1  # 进一步降低生成温度，获得更简洁、稳定的回答
-    top_p: float = 0.9  # top-p采样
+    quantization_type: str = "4bit"  # 改为4bit量化以节省GPU内存
+    max_new_tokens: int = 300  # 大幅增加到300，给模型足够空间生成完整答案
+    temperature: float = 0.2  # 降低温度，获得更稳定的回答
+    top_p: float = 0.8  # 进一步降低top-p，减少冗长
     do_sample: bool = True  # 是否使用采样
-    repetition_penalty: float = 1.1  # 重复惩罚，避免重复
+    repetition_penalty: float = 1.3  # 进一步增加重复惩罚
     pad_token_id: int = 0  # 填充token ID
     eos_token_id: int = 151643  # 结束token ID
 

@@ -16,6 +16,16 @@ Requirements:
 4.  Provide a concise and direct answer in complete sentences.
 5.  Do not repeat the question or add conversational fillers.
 
+Example 1:
+Context: Apple Inc. reported Q3 2023 revenue of $81.8 billion, down 1.4% year-over-year. iPhone sales increased 2.8% to $39.7 billion.
+Question: How did Apple perform in Q3 2023?
+Answer: Apple's Q3 2023 performance was mixed. Total revenue declined 1.4% to $81.8 billion, but iPhone sales grew 2.8% to $39.7 billion.
+
+Example 2:
+Context: Tesla's vehicle deliveries in Q2 2023 reached 466,140 units, up 83% from the previous year. Production capacity utilization improved to 95%.
+Question: What were Tesla's delivery numbers in Q2 2023?
+Answer: Tesla delivered 466,140 vehicles in Q2 2023, representing an 83% increase from the previous year.
+
 Context:
 {context}
 
@@ -23,21 +33,47 @@ Question: {question}
 
 Answer:"""
 
-PROMPT_TEMPLATE_ZH = """你是一位严谨且精确的金融分析专家。请你**严格根据以下<context>标签内提供的信息**来回答用户的问题。
+# 超简洁版本（推荐用于生产环境）
+PROMPT_TEMPLATE_ZH_SIMPLE = """基于上下文信息，用一句话回答用户问题。
 
-要求：
-1.  **严格遵循<context>中提供的信息。切勿使用任何外部知识或进行猜测。**
-2.  如果<context>中没有足够的信息来回答问题，请直接说："在提供的上下文中找不到答案。"
-3.  对于涉及金融预测或未来展望的问题，请优先提取<context>中明确陈述为预测或展望的信息。如果<context>中提及了报告发布日期，请以该日期时的视角进行回答。
-4.  用中文进行回答，内容要简洁、直接，形成完整的句子，回答不超过2-3句话。
-5.  不要重复问题内容或添加无关的寒暄。
+上下文：{context}
+问题：{question}
+回答："""
 
-上下文:
+PROMPT_TEMPLATE_ZH = """基于以下上下文信息，直接回答用户问题。只使用提供的信息，不要添加任何外部知识或格式化内容。
+
+示例1：
+上下文：中国平安2023年第一季度实现营业收入2,345.67亿元，同比增长8.5%；净利润为156.78亿元，同比增长12.3%。
+问题：中国平安的业绩如何？
+回答：中国平安2023年第一季度业绩表现良好，营业收入同比增长8.5%至2,345.67亿元，净利润同比增长12.3%至156.78亿元。
+
+示例2：
+上下文：腾讯控股2023年上半年游戏业务收入同比下降5.2%，广告业务收入同比增长3.1%。
+问题：腾讯的游戏业务表现如何？
+回答：腾讯2023年上半年游戏业务收入同比下降5.2%，表现不佳。
+
+上下文：
 {context}
 
-问题: {question}
+问题：{question}
 
-回答:"""
+回答："""
+
+# Chain-of-Thought版本（优化版，隐藏思考过程）
+PROMPT_TEMPLATE_ZH_COT = """你是一位专业的金融分析师。请基于以下上下文信息，通过内部思考来回答用户问题。
+
+重要要求：
+1. 请进行内部思考，但不要输出任何思考步骤或过程
+2. 直接给出最终答案，不要包含"思考"、"步骤"等词汇
+3. 只使用提供的上下文信息，不要添加外部知识
+4. 回答要简洁直接，用自然的中文表达
+
+上下文：
+{context}
+
+问题：{question}
+
+回答："""
 
 
 class RagSystem:
@@ -47,11 +83,15 @@ class RagSystem:
         generator: Generator,
         retriever_top_k: int,
         prompt_template: str = None, # No longer used, but kept for compatibility
+        use_cot: bool = False,  # 是否使用Chain-of-Thought
+        use_simple: bool = False,  # 是否使用超简洁模式
     ):
         self.retriever = retriever
         self.generator = generator
         # self.prompt_template is now obsolete
         self.retriever_top_k = retriever_top_k
+        self.use_cot = use_cot
+        self.use_simple = use_simple
 
     def run(self, user_input: str, language: str = None) -> RagOutput:
         # 1. Detect language of the user's question
@@ -72,7 +112,12 @@ class RagSystem:
 
         # 3. Select prompt based on question language and format the context
         if is_chinese_q:
-            prompt_template = PROMPT_TEMPLATE_ZH
+            if self.use_simple:
+                prompt_template = PROMPT_TEMPLATE_ZH_SIMPLE
+            elif self.use_cot:
+                prompt_template = PROMPT_TEMPLATE_ZH_COT
+            else:
+                prompt_template = PROMPT_TEMPLATE_ZH
             no_context_message = "未找到合适的语料，请检查数据源。"
         else:
             prompt_template = PROMPT_TEMPLATE_EN
@@ -103,6 +148,17 @@ class RagSystem:
             else:
                 retriever_model_name = getattr(self.retriever.encoder_en, 'model_name', 'unknown')
 
+        # 确定prompt模板类型
+        if is_chinese_q:
+            if self.use_simple:
+                template_type = "ZH-SIMPLE"
+            elif self.use_cot:
+                template_type = "ZH-COT"
+            else:
+                template_type = "ZH"
+        else:
+            template_type = "EN"
+
         return RagOutput(
             retrieved_documents=retrieved_documents,
             retriever_scores=retriever_scores,
@@ -112,7 +168,9 @@ class RagSystem:
                 retriever_model_name=retriever_model_name,
                 top_k=self.retriever_top_k,
                 generator_model_name=self.generator.model_name,
-                prompt_template="Golden-" + ("ZH" if is_chinese_q else "EN"),
-                question_language="zh" if is_chinese_q else "en"
+                prompt_template=f"Golden-{template_type}",
+                question_language="zh" if is_chinese_q else "en",
+                use_cot=self.use_cot,
+                use_simple=self.use_simple
             ),
         )

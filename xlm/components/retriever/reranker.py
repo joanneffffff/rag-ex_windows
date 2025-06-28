@@ -125,7 +125,7 @@ class QwenReranker:
     
     def process_inputs(self, pairs: List[str]) -> Dict[str, torch.Tensor]:
         """
-        处理输入（按照官方实现）
+        处理输入（优化版本，直接使用tokenizer.__call__方法）
         
         Args:
             pairs: 格式化后的指令字符串列表
@@ -133,25 +133,29 @@ class QwenReranker:
         Returns:
             分词器输出字典
         """
-        # 首先进行基础分词
+        # 为每个输入添加prefix和suffix tokens
+        processed_pairs = []
+        for pair in pairs:
+            # 预编码prefix和suffix tokens
+            prefix_tokens = self.tokenizer.encode(self.prefix, add_special_tokens=False)
+            suffix_tokens = self.tokenizer.encode(self.suffix, add_special_tokens=False)
+            
+            # 编码主要内容
+            content_tokens = self.tokenizer.encode(pair, add_special_tokens=False, 
+                                                  max_length=self.max_length - len(prefix_tokens) - len(suffix_tokens),
+                                                  truncation=True)
+            
+            # 组合所有tokens
+            full_tokens = prefix_tokens + content_tokens + suffix_tokens
+            processed_pairs.append(full_tokens)
+        
+        # 直接使用tokenizer.__call__方法进行padding（更高效）
         inputs = self.tokenizer(
-            pairs, 
-            padding=False, 
-            truncation='longest_first',
-            return_attention_mask=False, 
-            max_length=self.max_length - len(self.prefix_tokens) - len(self.suffix_tokens)
-        )
-        
-        # 为每个输入添加prefix和suffix tokens（按照官方实现）
-        for i, ele in enumerate(inputs['input_ids']):
-            inputs['input_ids'][i] = self.prefix_tokens + ele + self.suffix_tokens
-        
-        # 进行padding
-        inputs = self.tokenizer.pad(
-            inputs, 
-            padding=True, 
-            return_tensors="pt", 
-            max_length=self.max_length
+            processed_pairs,
+            padding='max_length',
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="pt"
         )
         
         # 移动到正确的设备
@@ -183,15 +187,15 @@ class QwenReranker:
         self,
         query: str,
         documents: List[str],
-        batch_size: int = 4
+        batch_size: int = 2  # 减少批处理大小以节省内存
     ) -> List[Tuple[str, float]]:
         """
-        对文档进行重排序
+        对文档进行重排序（优化内存使用）
         
         Args:
             query: 查询文本
             documents: 文档列表
-            batch_size: 批处理大小
+            batch_size: 批处理大小（默认2以减少内存使用）
             
         Returns:
             重排序后的(文档, 分数)列表
@@ -205,18 +209,38 @@ class QwenReranker:
             formatted_text = self.format_instruction(None, query, doc)
             formatted_pairs.append((formatted_text, doc))
         
-        # 批处理重排序
+        # 批处理重排序（优化内存使用）
         all_scores = []
         for i in range(0, len(formatted_pairs), batch_size):
             batch_pairs = formatted_pairs[i:i + batch_size]
             batch_texts = [pair[0] for pair in batch_pairs]
             
-            # 处理输入
-            inputs = self.process_inputs(batch_texts)
-            
-            # 计算分数
-            batch_scores = self.compute_logits(inputs)
-            all_scores.extend(batch_scores)
+            try:
+                # 处理输入
+                inputs = self.process_inputs(batch_texts)
+                
+                # 计算分数
+                batch_scores = self.compute_logits(inputs)
+                all_scores.extend(batch_scores)
+                
+                # 清理GPU内存
+                del inputs
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    
+            except RuntimeError as e:
+                if "out of memory" in str(e):
+                    print(f"GPU内存不足，尝试减小批处理大小...")
+                    # 如果内存不足，尝试更小的批处理
+                    if batch_size > 1:
+                        # 递归调用，使用更小的批处理大小
+                        return self.rerank(query, documents, batch_size=batch_size // 2)
+                    else:
+                        print("批处理大小已最小化，仍内存不足，尝试CPU处理...")
+                        # 最后尝试CPU处理
+                        return self._rerank_on_cpu(query, documents)
+                else:
+                    raise e
         
         # 组合文档和分数
         results = []
@@ -227,6 +251,52 @@ class QwenReranker:
         results.sort(key=lambda x: x[1], reverse=True)
         
         return results
+    
+    def _rerank_on_cpu(self, query: str, documents: List[str]) -> List[Tuple[str, float]]:
+        """
+        CPU回退重排序（当GPU内存不足时使用）
+        
+        Args:
+            query: 查询文本
+            documents: 文档列表
+            
+        Returns:
+            重排序后的(文档, 分数)列表
+        """
+        print("使用CPU进行重排序...")
+        
+        # 临时将模型移动到CPU
+        original_device = next(self.model.parameters()).device
+        self.model = self.model.cpu()
+        
+        try:
+            # 格式化所有文档
+            formatted_pairs = []
+            for doc in documents:
+                formatted_text = self.format_instruction(None, query, doc)
+                formatted_pairs.append((formatted_text, doc))
+            
+            # 逐个处理（CPU模式）
+            all_scores = []
+            for formatted_text, doc in formatted_pairs:
+                inputs = self.process_inputs([formatted_text])
+                score = self.compute_logits(inputs)[0]
+                all_scores.append(score)
+                del inputs
+            
+            # 组合文档和分数
+            results = []
+            for i, (formatted_text, doc) in enumerate(formatted_pairs):
+                results.append((doc, all_scores[i]))
+            
+            # 按分数降序排序
+            results.sort(key=lambda x: x[1], reverse=True)
+            
+            return results
+            
+        finally:
+            # 恢复模型到原始设备
+            self.model = self.model.to(original_device)
     
     def rerank_with_metadata(
         self,
