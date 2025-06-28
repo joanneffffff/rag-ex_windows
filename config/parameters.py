@@ -82,11 +82,11 @@ class SystemConfig:
 class GeneratorConfig:
     # 可选的生成器模型
     # model_name: str = "Qwen/Qwen2-1.5B-Instruct"  # 原始小模型
-    # model_name: str = "Qwen/Qwen3-8B"  # Qwen3-8B基础版本，更大的模型
-    model_name: str = "SUFE-AIFLM-Lab/Fin-R1"  # 上海财经大学金融推理大模型，专门针对金融领域优化
+    model_name: str = "Qwen/Qwen3-8B"  # Qwen3-8B基础版本，更大的模型，替代Fin-R1
+    # model_name: str = "SUFE-AIFLM-Lab/Fin-R1"  # 上海财经大学金融推理大模型，专门针对金融领域优化
     cache_dir: str = GENERATOR_CACHE_DIR
     
-    # 模型特定配置 - 大幅增加token数以获得完整答案，使用4bit量化节省内存
+    # 模型特定配置 - 针对Qwen3-8B优化的参数
     use_quantization: bool = True  # 是否使用量化
     quantization_type: str = "4bit"  # 改为4bit量化以节省GPU内存
     max_new_tokens: int = 600  # 大幅增加到600，给模型足够空间生成完整答案

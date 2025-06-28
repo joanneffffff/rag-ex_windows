@@ -29,7 +29,7 @@ def test_enhanced_prompts():
     test_context = """首钢股份2023年上半年实现营业收入1,234.56亿元，同比下降21.7%；净利润为-3.17亿元，同比下降77.14%，每股亏损0.06元。公司表示将通过注入优质资产来改善长期盈利能力，并承诺回馈股东。"""
     
     print("🔧 加载生成器...")
-    generator = LocalLLMGenerator()
+    generator = LocalLLMGenerator(device="cuda:1")
     
     print("=" * 60)
     print("🔧 测试增强的Few-Shot Prompt")
