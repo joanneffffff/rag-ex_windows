@@ -167,6 +167,7 @@ if __name__ == '__main__':
         Path("data/alphafin/alphafin_summarized_and_structured_qa_0627_b8_s50_fullsentence.json"), 
         Path("data/alphafin/alphafin_summarized_and_structured_qa_0627_colab_backward.json"),
         Path("data/alphafin/alphafin_summarized_and_structured_qa_0628_colab_backward.json"), # 如果有更多部分，请在这里添加
+        Path("data/alphafin/alphafin_summarized_and_structured_qa_0628_colab_missing.json"), # 如果有更多部分，请在这里添加p
     ]
 
     # 合并后的生成数据输出文件路径

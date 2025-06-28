@@ -59,6 +59,13 @@ class BilingualRetriever(Retriever):
         else:
             self._compute_embeddings()
 
+        if corpus_documents_en is not None:
+            for i, doc in enumerate(corpus_documents_en):
+                assert hasattr(doc, 'content') and isinstance(doc.content, str), f"corpus_documents_en污染: idx={i}, type={type(doc)}, 内容: {doc}"
+        if corpus_documents_ch is not None:
+            for i, doc in enumerate(corpus_documents_ch):
+                assert hasattr(doc, 'content') and isinstance(doc.content, str), f"corpus_documents_ch污染: idx={i}, type={type(doc)}, 内容: {doc}"
+
     def _get_cache_key(self, documents: List[DocumentWithMetadata], encoder_name: str) -> str:
         """生成缓存键，基于文档内容和编码器名称"""
         # 创建文档内容的哈希
@@ -243,6 +250,13 @@ class BilingualRetriever(Retriever):
         return_scores: bool = False,
         language: str = None,
     ) -> Union[List[DocumentWithMetadata], Tuple[List[DocumentWithMetadata], List[float]]]:
+        # 检查self.corpus_documents_en/ch类型
+        if hasattr(self, 'corpus_documents_en') and self.corpus_documents_en is not None:
+            for i, doc in enumerate(self.corpus_documents_en):
+                assert hasattr(doc, 'content') and isinstance(doc.content, str), f"self.corpus_documents_en污染: idx={i}, type={type(doc)}, 内容: {doc}"
+        if hasattr(self, 'corpus_documents_ch') and self.corpus_documents_ch is not None:
+            for i, doc in enumerate(self.corpus_documents_ch):
+                assert hasattr(doc, 'content') and isinstance(doc.content, str), f"self.corpus_documents_ch污染: idx={i}, type={type(doc)}, 内容: {doc}"
         if language is None:
             lang = detect(text)
             language = 'zh' if lang.startswith('zh') else 'en'
@@ -283,8 +297,10 @@ class BilingualRetriever(Retriever):
         documents = []
         for doc in raw_documents:
             if isinstance(doc, dict):
-                # 如果是dict，转换为DocumentWithMetadata
                 content = doc.get('content', doc.get('context', ''))
+                if not isinstance(content, str):
+                    # 如果content不是字符串，尝试取context字段或转为字符串
+                    content = content.get('context', '') if isinstance(content, dict) and 'context' in content else str(content)
                 metadata = DocumentMetadata(
                     source=doc.get('source', 'unknown'),
                     created_at=doc.get('created_at', ''),
@@ -293,7 +309,6 @@ class BilingualRetriever(Retriever):
                 )
                 documents.append(DocumentWithMetadata(content=content, metadata=metadata))
             else:
-                # 如果已经是DocumentWithMetadata，直接使用
                 documents.append(doc)
         
         if return_scores:

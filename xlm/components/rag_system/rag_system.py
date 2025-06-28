@@ -131,6 +131,15 @@ class RagSystem:
             text=user_input, top_k=self.retriever_top_k, return_scores=True
         )
 
+        # 调试信息：检查retrieved_documents的类型和内容
+        print(f"DEBUG: retrieved_documents type: {type(retrieved_documents)}")
+        print(f"DEBUG: retrieved_documents length: {len(retrieved_documents)}")
+        if retrieved_documents:
+            print(f"DEBUG: First document type: {type(retrieved_documents[0])}")
+            print(f"DEBUG: First document content: {getattr(retrieved_documents[0], 'content', 'NO_CONTENT_ATTR')[:100]}...")
+            if isinstance(retrieved_documents[0], dict):
+                print(f"DEBUG: First document keys: {list(retrieved_documents[0].keys())}")
+
         # 3. Select prompt based on question language and format the context
         if is_chinese_q:
             if self.use_simple:
@@ -154,7 +163,11 @@ class RagSystem:
                 metadata={}
             )
 
-        context_str = "\n\n".join([doc.content for doc in retrieved_documents])
+        context_str = "\n\n".join([
+            # 如果content是字典，提取其中的context或content字段
+            (doc.content.get('context', doc.content.get('content', str(doc.content))) if isinstance(doc.content, dict) else doc.content)
+            for doc in retrieved_documents
+        ])
         
         # 4. Create the final prompt
         try:

@@ -161,7 +161,8 @@ class OptimizedDataLoader:
                         )
                     elif 'question' in item and 'context' in item:
                         # 问答格式：使用context作为内容
-                        final_content = item.get("context", "")
+                        content = item.get("context", "")
+                        assert isinstance(content, str), f"content类型错误: {type(content)}, 内容: {content}"
                         metadata = DocumentMetadata(
                             source=tatqa_path.name,
                             created_at="",
@@ -171,6 +172,7 @@ class OptimizedDataLoader:
                     else:
                         # 其他格式：尝试找到文本内容
                         final_content = str(item)
+                        assert isinstance(final_content, str), f"content类型错误: {type(final_content)}, 内容: {final_content}"
                         metadata = DocumentMetadata(
                             source=tatqa_path.name,
                             created_at="",
@@ -179,6 +181,7 @@ class OptimizedDataLoader:
                         )
                 else:
                     final_content = str(item)
+                    assert isinstance(final_content, str), f"content类型错误: {type(final_content)}, 内容: {final_content}"
                     metadata = DocumentMetadata(
                         source=tatqa_path.name,
                         created_at="",
@@ -235,6 +238,7 @@ class OptimizedDataLoader:
                     if 'question' in record and 'context' in record:
                         # 问答格式：使用context作为内容
                         content = record.get("context")
+                        assert isinstance(content, str), f"content类型错误: {type(content)}, 内容: {content}"
                         metadata = {
                             "source": "alphafin_qa",
                             "question": record.get("question", ""),
@@ -243,9 +247,11 @@ class OptimizedDataLoader:
                     else:
                         # 其他格式：尝试找到文本内容
                         content = str(record)
+                        assert isinstance(content, str), f"content类型错误: {type(content)}, 内容: {content}"
                         metadata = {"source": "alphafin", "language": "chinese"}
                 else:
                     content = str(record)
+                    assert isinstance(content, str), f"content类型错误: {type(content)}, 内容: {content}"
                     metadata = {"source": "alphafin", "language": "chinese"}
                 
                 if content and isinstance(content, str):
@@ -539,9 +545,21 @@ class OptimizedDataLoader:
                 # 处理不同的数据格式
                 if isinstance(record, dict):
                     if 'context' in record:
-                        # 使用context作为文档内容
-                        content = record.get("context")
-                        question = record.get("question", "")
+                        # 只取context字段文本内容
+                        content = record['context']
+                        assert isinstance(content, str), f"content类型错误: {type(content)}, 内容: {content}"
+                        question = record.get('question', "")
+                        metadata = {
+                            "source": f"eval_{language}",
+                            "question": question,
+                            "language": language,
+                            "eval_data": True
+                        }
+                    elif 'content' in record:
+                        # 兼容content字段
+                        content = record['content']
+                        assert isinstance(content, str), f"content类型错误: {type(content)}, 内容: {content}"
+                        question = record.get('question', "")
                         metadata = {
                             "source": f"eval_{language}",
                             "question": question,
@@ -549,11 +567,13 @@ class OptimizedDataLoader:
                             "eval_data": True
                         }
                     else:
-                        # 其他格式：尝试找到文本内容
+                        # 兜底：把所有字段拼成字符串
                         content = str(record)
+                        assert isinstance(content, str), f"content类型错误: {type(content)}, 内容: {content}"
                         metadata = {"source": f"eval_{language}", "language": language, "eval_data": True}
                 else:
                     content = str(record)
+                    assert isinstance(content, str), f"content类型错误: {type(content)}, 内容: {content}"
                     metadata = {"source": f"eval_{language}", "language": language, "eval_data": True}
                 
                 if content and isinstance(content, str):
