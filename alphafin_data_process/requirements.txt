@@ -1,0 +1,5 @@
+faiss-cpu==1.7.4
+sentence-transformers==2.2.2
+rank-bm25==0.2.2
+numpy>=1.21.0
+scikit-learn>=1.0.0 
