@@ -147,9 +147,9 @@ def process_alphafin_data_with_forced_question_metadata(
     print(f"正在批量处理切片中的记录，批大小为 {batch_size}...")
     
     for batch_idx_in_slice in tqdm(
-        range(slice_start_index_for_resume, total_records_in_slice, batch_size), 
-        initial=slice_start_index_for_resume, 
-        total=total_records_in_slice,
+        range(slice_start_index_for_resume, total_records_in_slice, batch_size),
+        initial=slice_start_index_for_resume // batch_size, # 初始批次索引
+        total=(total_records_in_slice + batch_size - 1) // batch_size, # 总批次数量
         desc="处理数据"
     ):
         batch_records = cleaned_data[batch_idx_in_slice : batch_idx_in_slice + batch_size]
