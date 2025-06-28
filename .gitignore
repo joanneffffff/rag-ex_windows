@@ -41,6 +41,7 @@ data/**/*
 #    这条规则否定了上面的 data/**/* 规则，只允许这一个文件被追踪。
 #    不需要单独的 !data/alphafin/ 规则了，因为 Git 足够智能可以直接找到文件。
 !data/alphafin/alphafin_summarized_and_structured_qa_0627_b8_s50_fullsentence.json
+!data/alphafin/alphafin_summarized_and_structured_qa_0627_colab_backward.json
 
 # --- Other Specific Ignores (If you have other top-level directories to ignore) ---
 # 例如，如果你有 models/ 或 checkpoints/ 目录需要忽略，可以在这里添加：
