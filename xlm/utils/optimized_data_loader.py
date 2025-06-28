@@ -232,11 +232,7 @@ class OptimizedDataLoader:
             for record in tqdm(alphafin_data, desc="Processing Optimized AlphaFin Data"):
                 # 处理不同的数据格式
                 if isinstance(record, dict):
-                    if 'content' in record:
-                        # 新格式：直接有content字段
-                        content = record.get("content")
-                        metadata = record.get("metadata", {})
-                    elif 'question' in record and 'context' in record:
+                    if 'question' in record and 'context' in record:
                         # 问答格式：使用context作为内容
                         content = record.get("context")
                         metadata = {

@@ -24,10 +24,10 @@ def convert_json_context_to_natural_language_chunks(json_str_context, company_na
     cleaned_initial = re.sub(re.escape("【答案】:"), "", cleaned_initial).strip()
     
     # 其他通用字符替换和空格清理
-    # 注意：这里您的代码将句号“。”替换为了逗号“,”。
+    # 注意：这里您的代码将句号"。"替换为了逗号"，"。
     # 对于中文语义，通常不建议将句号直接替换为逗号，这会改变句子的完整性。
     # 我在这里将其改回不替换句号，只替换其他特殊空格和括号。
-    # 如果您确认原始数据中“。”确实代表需要被当做分隔符的“,”，请自行调整。
+    # 如果您确认原始数据中"。"确实代表需要被当做分隔符的"，"，请自行调整。
     cleaned_initial = cleaned_initial.replace('，', ',')
     cleaned_initial = cleaned_initial.replace('：', ':')
     # cleaned_initial = cleaned_initial.replace('。', ',') # 暂时注释掉，保留中文句号
@@ -73,7 +73,7 @@ def convert_json_context_to_natural_language_chunks(json_str_context, company_na
         else:
             report_title_main = report_title_full
 
-        chunk_text = f"一份发布日期为 {report_date} 的研究报告，其标题是：“{report_title_main}”{company_info}。报告摘要内容：{report_content_preview.rstrip('...') if report_content_preview.endswith('...') else report_content_preview}。"
+        chunk_text = f"一份发布日期为 {report_date} 的研究报告，其标题是：{report_title_main}{company_info}。报告摘要内容：{report_content_preview.rstrip('...') if report_content_preview.endswith('...') else report_content_preview}。"
         chunks.append(chunk_text)
         return chunks 
 

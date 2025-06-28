@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from xlm.components.encoder.finbert import FinbertEncoder
 from xlm.components.retriever.retriever import Retriever
-from xlm.dto.dto import DocumentWithMetadata
+from xlm.dto.dto import DocumentWithMetadata, DocumentMetadata
 
 class BilingualRetriever(Retriever):
     def __init__(
@@ -25,7 +25,8 @@ class BilingualRetriever(Retriever):
         use_faiss: bool = False,
         batch_size: int = 32,
         use_gpu: bool = False,
-        cache_dir: str = "cache"
+        cache_dir: str = "cache",
+        use_existing_embedding_index: bool = False
     ):
         self.encoder_en = encoder_en
         self.encoder_ch = encoder_ch
@@ -35,6 +36,7 @@ class BilingualRetriever(Retriever):
         self.batch_size = batch_size
         self.use_gpu = use_gpu
         self.cache_dir = cache_dir
+        self.use_existing_embedding_index = use_existing_embedding_index
 
         self.corpus_documents_en = corpus_documents_en or []
         self.corpus_embeddings_en = None
@@ -47,11 +49,14 @@ class BilingualRetriever(Retriever):
         # 创建缓存目录
         os.makedirs(self.cache_dir, exist_ok=True)
 
-        # 尝试加载缓存的嵌入向量
-        if self._load_cached_embeddings():
-            print("Loaded cached embeddings successfully.")
+        # 只在use_existing_embedding_index为True时尝试加载缓存，否则强制重新编码
+        if self.use_existing_embedding_index:
+            loaded = self._load_cached_embeddings()
+            if loaded:
+                print("Loaded cached embeddings successfully.")
+            else:
+                raise RuntimeError("use_existing_embedding_index=True但未找到有效缓存，请先生成embedding缓存！")
         else:
-            print("No valid cache found, computing embeddings...")
             self._compute_embeddings()
 
     def _get_cache_key(self, documents: List[DocumentWithMetadata], encoder_name: str) -> str:
@@ -75,6 +80,8 @@ class BilingualRetriever(Retriever):
     def _load_cached_embeddings(self) -> bool:
         """尝试加载缓存的嵌入向量"""
         try:
+            loaded_any = False
+            
             # 检查英文文档缓存
             if self.corpus_documents_en:
                 cache_key_en = self._get_cache_key(self.corpus_documents_en, str(self.encoder_en.model_name))
@@ -82,19 +89,30 @@ class BilingualRetriever(Retriever):
                 index_path_en = self._get_cache_path(cache_key_en, "faiss")
                 
                 if os.path.exists(embeddings_path_en):
-                    print(f"Loading cached English embeddings from {embeddings_path_en}")
                     self.corpus_embeddings_en = np.load(embeddings_path_en)
+                    loaded_any = True
                     
                     if self.use_faiss and os.path.exists(index_path_en):
-                        print(f"Loading cached English FAISS index from {index_path_en}")
                         self.index_en = faiss.read_index(index_path_en)
                     elif self.use_faiss:
-                        print("Initializing FAISS index for English documents...")
                         self.index_en = self._init_faiss(self.encoder_en, len(self.corpus_documents_en))
                         if self.corpus_embeddings_en is not None:
                             self._add_to_faiss(self.index_en, self.corpus_embeddings_en)
-                else:
-                    return False
+            else:
+                # 英文文档为空，检查是否有任何英文缓存文件
+                cache_files = [f for f in os.listdir(self.cache_dir) if f.endswith('.npy') and 'finetuned_finbert_tatqa' in f]
+                if cache_files:
+                    # 使用第一个找到的缓存文件
+                    cache_file = cache_files[0]
+                    embeddings_path_en = os.path.join(self.cache_dir, cache_file)
+                    self.corpus_embeddings_en = np.load(embeddings_path_en)
+                    loaded_any = True
+                    
+                    # 尝试加载对应的FAISS索引
+                    index_file = cache_file.replace('.npy', '.faiss')
+                    index_path_en = os.path.join(self.cache_dir, index_file)
+                    if os.path.exists(index_path_en):
+                        self.index_en = faiss.read_index(index_path_en)
 
             # 检查中文文档缓存
             if self.corpus_documents_ch:
@@ -103,23 +121,33 @@ class BilingualRetriever(Retriever):
                 index_path_ch = self._get_cache_path(cache_key_ch, "faiss")
                 
                 if os.path.exists(embeddings_path_ch):
-                    print(f"Loading cached Chinese embeddings from {embeddings_path_ch}")
                     self.corpus_embeddings_ch = np.load(embeddings_path_ch)
+                    loaded_any = True
                     
                     if self.use_faiss and os.path.exists(index_path_ch):
-                        print(f"Loading cached Chinese FAISS index from {index_path_ch}")
                         self.index_ch = faiss.read_index(index_path_ch)
                     elif self.use_faiss:
-                        print("Initializing FAISS index for Chinese documents...")
                         self.index_ch = self._init_faiss(self.encoder_ch, len(self.corpus_documents_ch))
                         if self.corpus_embeddings_ch is not None:
                             self._add_to_faiss(self.index_ch, self.corpus_embeddings_ch)
-                else:
-                    return False
+            else:
+                # 中文文档为空，检查是否有任何中文缓存文件
+                cache_files = [f for f in os.listdir(self.cache_dir) if f.endswith('.npy') and 'finetuned_alphafin' in f]
+                if cache_files:
+                    # 使用第一个找到的缓存文件
+                    cache_file = cache_files[0]
+                    embeddings_path_ch = os.path.join(self.cache_dir, cache_file)
+                    self.corpus_embeddings_ch = np.load(embeddings_path_ch)
+                    loaded_any = True
+                    
+                    # 尝试加载对应的FAISS索引
+                    index_file = cache_file.replace('.npy', '.faiss')
+                    index_path_ch = os.path.join(self.cache_dir, index_file)
+                    if os.path.exists(index_path_ch):
+                        self.index_ch = faiss.read_index(index_path_ch)
 
-            return True
+            return loaded_any
         except Exception as e:
-            print(f"Error loading cached embeddings: {e}")
             return False
 
     def _save_cached_embeddings(self):
@@ -133,10 +161,8 @@ class BilingualRetriever(Retriever):
                 # 确保目录存在
                 os.makedirs(os.path.dirname(embeddings_path_en), exist_ok=True)
                 os.makedirs(os.path.dirname(index_path_en), exist_ok=True)
-                print(f"Saving English embeddings to {embeddings_path_en}")
                 np.save(embeddings_path_en, self.corpus_embeddings_en)
                 if self.use_faiss and self.index_en:
-                    print(f"Saving English FAISS index to {index_path_en}")
                     faiss.write_index(self.index_en, index_path_en)
 
             # 保存中文文档嵌入向量
@@ -147,44 +173,34 @@ class BilingualRetriever(Retriever):
                 # 确保目录存在
                 os.makedirs(os.path.dirname(embeddings_path_ch), exist_ok=True)
                 os.makedirs(os.path.dirname(index_path_ch), exist_ok=True)
-                print(f"Saving Chinese embeddings to {embeddings_path_ch}")
                 np.save(embeddings_path_ch, self.corpus_embeddings_ch)
                 if self.use_faiss and self.index_ch:
-                    print(f"Saving Chinese FAISS index to {index_path_ch}")
                     faiss.write_index(self.index_ch, index_path_ch)
         except Exception as e:
-            print(f"Error saving cached embeddings: {e}")
+            pass
 
     def _compute_embeddings(self):
         """计算嵌入向量"""
         if self.use_faiss:
             if self.corpus_documents_en:
-                print("Initializing FAISS index for English documents...")
                 self.index_en = self._init_faiss(self.encoder_en, len(self.corpus_documents_en))
             if self.corpus_documents_ch:
-                print("Initializing FAISS index for Chinese documents...")
                 self.index_ch = self._init_faiss(self.encoder_ch, len(self.corpus_documents_ch))
 
         if self.corpus_documents_en:
-            print(f"Start encoding {len(self.corpus_documents_en)} English chunks...")
             self.corpus_embeddings_en = self._batch_encode_corpus(self.corpus_documents_en, self.encoder_en)
             if self.use_faiss and self.corpus_embeddings_en is not None:
-                print("Adding English chunk embeddings to FAISS index...")
                 self._add_to_faiss(self.index_en, self.corpus_embeddings_en)
-                print("English chunks indexed.")
 
         if self.corpus_documents_ch:
-            print(f"Start encoding {len(self.corpus_documents_ch)} Chinese chunks...")
             self.corpus_embeddings_ch = self._batch_encode_corpus(self.corpus_documents_ch, self.encoder_ch)
             if self.use_faiss and self.corpus_embeddings_ch is not None:
-                print("Adding Chinese chunk embeddings to FAISS index...")
                 self._add_to_faiss(self.index_ch, self.corpus_embeddings_ch)
-                print("Chinese chunks indexed.")
         
         # 保存到缓存
         self._save_cached_embeddings()
         
-        print("Retriever initialization complete.")
+        pass
 
     def _init_faiss(self, encoder, corpus_size):
         """Initialize FAISS index"""
@@ -261,7 +277,25 @@ class BilingualRetriever(Retriever):
             results = hits[0]
         doc_indices = [hit['corpus_id'] for hit in results]
         scores = [hit['score'] for hit in results]
-        documents = [corpus_documents[i] for i in doc_indices]
+        raw_documents = [corpus_documents[i] for i in doc_indices]
+        
+        # 确保返回的是DocumentWithMetadata对象，统一使用content字段
+        documents = []
+        for doc in raw_documents:
+            if isinstance(doc, dict):
+                # 如果是dict，转换为DocumentWithMetadata
+                content = doc.get('content', doc.get('context', ''))
+                metadata = DocumentMetadata(
+                    source=doc.get('source', 'unknown'),
+                    created_at=doc.get('created_at', ''),
+                    author=doc.get('author', ''),
+                    language=language or 'unknown'
+                )
+                documents.append(DocumentWithMetadata(content=content, metadata=metadata))
+            else:
+                # 如果已经是DocumentWithMetadata，直接使用
+                documents.append(doc)
+        
         if return_scores:
             return documents, scores
         else:

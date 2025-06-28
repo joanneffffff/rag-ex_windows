@@ -540,7 +540,7 @@ class MultiStageRetrievalSystem:
                     if self.dataset_type == "chinese":
                         content = record.get('summary', '')
                     else:
-                        content = record.get('context', '') or record.get('content', '')
+                        content = record.get('context', '')
                     docs_for_rerank.append(content)
                     doc_to_rerank_mapping.append((doc_idx, -1))
                 else:
@@ -627,7 +627,7 @@ class MultiStageRetrievalSystem:
                     if self.dataset_type == "chinese":
                         content = record.get('summary', '')
                     else:
-                        content = record.get('context', '') or record.get('content', '')
+                        content = record.get('context', '')
                     top_chunks.append(content)
         
         # 拼接chunks作为上下文

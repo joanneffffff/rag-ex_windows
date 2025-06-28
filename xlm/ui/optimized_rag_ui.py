@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import faiss
 from langdetect import detect, LangDetectException
+import hashlib
 
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -202,25 +203,46 @@ class OptimizedRagUI:
         try:
             from xlm.utils.optimized_data_loader import OptimizedDataLoader
             
-            # 对于AlphaFin数据，使用原始流程进行chunking
+            # 对于AlphaFin数据，使用summary字段而不是chunks
             data_loader = OptimizedDataLoader(
                 data_dir="data",
                 max_samples=config.data.max_samples,
-                chinese_document_level=False,  # AlphaFin使用chunk级别处理
+                chinese_document_level=True,  # 使用文档级别，避免过度chunking
                 english_chunk_level=True      # 英文保持chunk级别
             )
             
             # 获取处理后的文档
-            chinese_chunks = data_loader.chinese_docs
+            chinese_docs = data_loader.chinese_docs
             english_chunks = data_loader.english_docs
+            
+            # 对于中文数据，提取summary字段用于传统RAG
+            chinese_summaries = []
+            for doc in chinese_docs:
+                # 尝试从文档内容中提取summary信息
+                content = doc.content
+                if isinstance(content, str) and len(content) > 0:
+                    # 如果内容太长，取前500字符作为summary
+                    summary = content[:500] + "..." if len(content) > 500 else content
+                    # 创建新的DocumentWithMetadata对象
+                    summary_doc = DocumentWithMetadata(
+                        content=summary,
+                        metadata=DocumentMetadata(
+                            source=doc.metadata.source,
+                            created_at=doc.metadata.created_at,
+                            author=doc.metadata.author,
+                            language="chinese"
+                        )
+                    )
+                    chinese_summaries.append(summary_doc)
             
             # 显示统计信息
             stats = data_loader.get_statistics()
-            print(f"✅ 文档级别chunking完成:")
+            print(f"✅ 文档级别处理完成:")
             print(f"   中文文档数: {stats['chinese_docs']}")
             print(f"   英文文档数: {stats['english_docs']}")
             print(f"   中文平均长度: {stats['chinese_avg_length']:.2f}")
             print(f"   英文平均长度: {stats['english_avg_length']:.2f}")
+            print(f"   中文summary数: {len(chinese_summaries)}")
             
         except Exception as e:
             print(f"❌ 优化数据加载器失败: {e}")
@@ -247,8 +269,26 @@ class OptimizedRagUI:
             if len(chinese_chunks) > self.max_alphafin_chunks:
                 print(f"Limiting Chinese chunks from {len(chinese_chunks)} to {self.max_alphafin_chunks} for testing...")
                 chinese_chunks = chinese_chunks[:self.max_alphafin_chunks]
+            
+            # 对于传统方式，也提取summary
+            chinese_summaries = []
+            for doc in chinese_chunks:
+                content = doc.content
+                if isinstance(content, str) and len(content) > 0:
+                    summary = content[:500] + "..." if len(content) > 500 else content
+                    # 创建新的DocumentWithMetadata对象
+                    summary_doc = DocumentWithMetadata(
+                        content=summary,
+                        metadata=DocumentMetadata(
+                            source=doc.metadata.source,
+                            created_at=doc.metadata.created_at,
+                            author=doc.metadata.author,
+                            language="chinese"
+                        )
+                    )
+                    chinese_summaries.append(summary_doc)
         
-        print(f"Final chunk count: {len(chinese_chunks)} Chinese chunks, {len(english_chunks)} English chunks")
+        print(f"Final summary count: {len(chinese_summaries)} Chinese summaries, {len(english_chunks)} English chunks")
         
         # 直接创建BilingualRetriever，embedding基于chunk
         from xlm.components.retriever.bilingual_retriever import BilingualRetriever
@@ -280,20 +320,25 @@ class OptimizedRagUI:
             cache_dir = config.encoder.cache_dir  # 使用encoder的缓存目录
         else:
             print("Forcing to recompute embeddings (ignoring existing cache)...")
-            import tempfile
-            cache_dir = tempfile.mkdtemp(prefix="rag_temp_cache_")
-            print(f"Using temporary cache directory: {cache_dir}")
+            # 仍然使用models/embedding_cache，但会重新计算嵌入
+            cache_dir = config.encoder.cache_dir
+            print(f"Using cache directory: {cache_dir} (will recompute embeddings)")
         
+        print(f"[UI DEBUG] self.use_existing_embedding_index={self.use_existing_embedding_index}")
+        print("=== BEFORE BilingualRetriever ===", flush=True)
         self.retriever = BilingualRetriever(
             encoder_en=encoder_en,
             encoder_ch=encoder_ch,
             corpus_documents_en=english_chunks,
-            corpus_documents_ch=chinese_chunks,
+            corpus_documents_ch=chinese_summaries,
             use_faiss=self.use_faiss,
             use_gpu=False,
             batch_size=8,
-            cache_dir=cache_dir
+            cache_dir=cache_dir,
+            use_existing_embedding_index=self.use_existing_embedding_index
         )
+        print("=== AFTER BilingualRetriever ===", flush=True)
+        print(f"[UI DEBUG] BilingualRetriever created with use_existing_embedding_index={self.use_existing_embedding_index}")
         
         if self.use_faiss:
             print("Step 3.1. Initializing FAISS index...")
@@ -468,7 +513,6 @@ class OptimizedRagUI:
         if not self.multi_stage_system:
             print("❌ 多阶段检索系统未初始化，回退到传统检索")
             return self._process_with_traditional_rag(question, 'zh', reranker_checkbox)
-            
         try:
             # 尝试提取公司名称和股票代码用于元数据过滤
             company_name = None
@@ -505,47 +549,73 @@ class OptimizedRagUI:
             retrieved_documents = []
             retriever_scores = []
             
-            for result in results:
-                # 创建DocumentWithMetadata对象
-                doc = DocumentWithMetadata(
-                    content=result.get('original_context', result.get('summary', '')),
-                    metadata=DocumentMetadata(
-                        source=result.get('company_name', 'Unknown'),
-                        created_at="",
-                        author="",
-                        language="chinese"
+            # 检查results的格式
+            if isinstance(results, dict) and 'retrieved_documents' in results:
+                documents = results['retrieved_documents']
+                llm_answer = results.get('llm_answer', '')
+                for result in documents:
+                    doc = DocumentWithMetadata(
+                        content=result.get('original_context', result.get('summary', '')),
+                        metadata=DocumentMetadata(
+                            source=result.get('company_name', 'Unknown'),
+                            created_at="",
+                            author="",
+                            language="chinese"
+                        )
                     )
-                )
-                retrieved_documents.append(doc)
-                retriever_scores.append(result.get('combined_score', 0.0))
-            
-            print(f"✅ 多阶段检索完成，找到 {len(retrieved_documents)} 条结果")
-            
-            # 生成答案
+                    retrieved_documents.append(doc)
+                    retriever_scores.append(result.get('combined_score', 0.0))
+                print(f"✅ 多阶段检索完成，找到 {len(retrieved_documents)} 条结果")
+                # === 新增：original_context去重 ===
+                unique_contexts = {}
+                for doc, score in zip(retrieved_documents, retriever_scores):
+                    context = doc.content
+                    h = hashlib.md5(context.encode('utf-8')).hexdigest()
+                    if h not in unique_contexts or score > unique_contexts[h][1]:
+                        unique_contexts[h] = (doc, score)
+                # 只保留去重后的内容，按分数排序
+                dedup_docs = sorted(unique_contexts.values(), key=lambda x: -x[1])
+                # 如果多阶段检索系统已经生成了答案，直接使用
+                if llm_answer:
+                    context_data = []
+                    for doc, score in dedup_docs[:20]:
+                        context_data.append([f"{score:.4f}", doc.content[:500] + "..." if len(doc.content) > 500 else doc.content])
+                    answer = f"[Multi-Stage Retrieval: ZH] {llm_answer}"
+                    return answer, context_data, None
+            else:
+                for result in results:
+                    doc = DocumentWithMetadata(
+                        content=result.get('original_context', result.get('summary', '')),
+                        metadata=DocumentMetadata(
+                            source=result.get('company_name', 'Unknown'),
+                            created_at="",
+                            author="",
+                            language="chinese"
+                        )
+                    )
+                    retrieved_documents.append(doc)
+                    retriever_scores.append(result.get('combined_score', 0.0))
             if retrieved_documents:
-                # 构建上下文
-                context_str = "\n\n".join([doc.content for doc in retrieved_documents[:10]])
-                
-                # 使用中文prompt模板
+                # === 新增：original_context去重 ===
+                unique_contexts = {}
+                for doc, score in zip(retrieved_documents, retriever_scores):
+                    context = doc.content
+                    h = hashlib.md5(context.encode('utf-8')).hexdigest()
+                    if h not in unique_contexts or score > unique_contexts[h][1]:
+                        unique_contexts[h] = (doc, score)
+                dedup_docs = sorted(unique_contexts.values(), key=lambda x: -x[1])
+                context_str = "\n\n".join([doc.content for doc, _ in dedup_docs[:10]])
                 from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_ZH
                 prompt = PROMPT_TEMPLATE_ZH.format(context=context_str, question=question)
-                
-                # 生成答案
                 generated_responses = self.rag_system.generator.generate(texts=[prompt])
                 answer = generated_responses[0] if generated_responses else "Unable to generate answer"
-                
-                # 准备上下文数据
                 context_data = []
-                for doc, score in zip(retrieved_documents[:20], retriever_scores[:20]):
+                for doc, score in dedup_docs[:20]:
                     context_data.append([f"{score:.4f}", doc.content[:500] + "..." if len(doc.content) > 500 else doc.content])
-                
-                # 添加检索系统信息
                 answer = f"[Multi-Stage Retrieval: ZH] {answer}"
-                
                 return answer, context_data, None
             else:
                 return "No relevant documents found.", [], None
-                
         except Exception as e:
             print(f"❌ 多阶段检索失败: {e}")
             print("回退到传统检索...")
@@ -563,70 +633,94 @@ class OptimizedRagUI:
                 from simple_query_test import SimpleQueryOptimizer
             except ImportError:
                 print("simple_query_test.py未找到或导入失败，回退到普通检索。")
-                rag_output = self.rag_system.run(user_input=question, language=language)
-            else:
-                optimizer = SimpleQueryOptimizer()
-                entity = optimizer.extract_entities(question)
-                query_variants = optimizer.create_optimized_queries(question, entity)
-                all_docs = []
-                all_scores = []
-                seen_doc_ids = set()
-                for q in query_variants:
-                    docs, scores = self.rag_system.retriever.retrieve(
-                        text=q, top_k=self.rag_system.retriever_top_k, return_scores=True, language=language
-                    )
-                    for doc, score in zip(docs, scores):
-                        doc_id = getattr(doc, 'id', None)
-                        if doc_id not in seen_doc_ids:
-                            all_docs.append(doc)
-                            all_scores.append(score)
-                            seen_doc_ids.add(doc_id)
-                    if len(all_docs) >= self.rag_system.retriever_top_k:
-                        break
-                # 构造RagOutput前，增加实体过滤
-                def filter_by_entity(docs, scores, entity):
-                    filtered_docs = []
-                    filtered_scores = []
-                    for doc, score in zip(docs, scores):
-                        if entity.stock_code and entity.stock_code in doc.content:
-                            filtered_docs.append(doc)
-                            filtered_scores.append(score)
-                        elif entity.company_name and entity.company_name in doc.content:
-                            filtered_docs.append(doc)
-                            filtered_scores.append(score)
-                    if filtered_docs:
-                        return filtered_docs, filtered_scores
-                    else:
-                        return docs, scores
-                all_docs, all_scores = filter_by_entity(all_docs, all_scores, entity)
-                # 构造RagOutput
-                if not all_docs:
+                try:
                     rag_output = self.rag_system.run(user_input=question, language=language)
-                else:
-                    # 只生成一次prompt和答案
-                    context_str = "\n\n".join([doc.content for doc in all_docs[:self.rag_system.retriever_top_k]])
-                    # 修复：从rag_system模块导入prompt模板
-                    from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_ZH
-                    prompt = PROMPT_TEMPLATE_ZH.format(context=context_str, question=question)
-                    generated_responses = self.rag_system.generator.generate(texts=[prompt])
-                    # 修复：使用正确的RagOutput类型
-                    from xlm.dto.dto import RagOutput
-                    rag_output = RagOutput(
-                        retrieved_documents=all_docs[:self.rag_system.retriever_top_k],
-                        retriever_scores=all_scores[:self.rag_system.retriever_top_k],
-                        prompt=prompt,
-                        generated_responses=generated_responses,
-                        metadata=dict(
-                            # 修复：安全访问encoder_ch属性
-                            retriever_model_name=getattr(getattr(self.rag_system.retriever, 'encoder_ch', None), 'model_name', 'unknown') if hasattr(self.rag_system.retriever, 'encoder_ch') else 'unknown',
-                            top_k=self.rag_system.retriever_top_k,
-                            generator_model_name=self.rag_system.generator.model_name,
-                            prompt_template="Golden-ZH",
-                            question_language="zh"
-                        ),
-                    )
+                except Exception as e:
+                    print(f"传统RAG系统运行失败: {e}")
+                    # 如果传统RAG也失败，返回错误信息
+                    return f"系统错误: {str(e)}", [], None
+            else:
+                try:
+                    optimizer = SimpleQueryOptimizer()
+                    entity = optimizer.extract_entities(question)
+                    query_variants = optimizer.create_optimized_queries(question, entity)
+                    all_docs = []
+                    all_scores = []
+                    seen_doc_ids = set()
+                    for q in query_variants:
+                        docs, scores = self.rag_system.retriever.retrieve(
+                            text=q, top_k=self.rag_system.retriever_top_k, return_scores=True, language=language
+                        )
+                        for doc, score in zip(docs, scores):
+                            doc_id = getattr(doc, 'id', None)
+                            if doc_id not in seen_doc_ids:
+                                all_docs.append(doc)
+                                all_scores.append(score)
+                                seen_doc_ids.add(doc_id)
+                        if len(all_docs) >= self.rag_system.retriever_top_k:
+                            break
+                    # 构造RagOutput前，增加实体过滤
+                    def filter_by_entity(docs, scores, entity):
+                        filtered_docs = []
+                        filtered_scores = []
+                        for doc, score in zip(docs, scores):
+                            if entity.stock_code and entity.stock_code in doc.content:
+                                filtered_docs.append(doc)
+                                filtered_scores.append(score)
+                            elif entity.company_name and entity.company_name in doc.content:
+                                filtered_docs.append(doc)
+                                filtered_scores.append(score)
+                        if filtered_docs:
+                            return filtered_docs, filtered_scores
+                        else:
+                            return docs, scores
+                    all_docs, all_scores = filter_by_entity(all_docs, all_scores, entity)
+                    # 构造RagOutput
+                    if not all_docs:
+                        rag_output = self.rag_system.run(user_input=question, language=language)
+                    else:
+                        # 只生成一次prompt和答案
+                        context_str = "\n\n".join([doc.content for doc in all_docs[:self.rag_system.retriever_top_k]])
+                        # 修复：从rag_system模块导入prompt模板
+                        from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_ZH
+                        try:
+                            prompt = PROMPT_TEMPLATE_ZH.format(context=context_str, question=question)
+                        except Exception as e:
+                            print(f"Prompt格式化失败: {e}")
+                            # 使用简单的prompt作为回退
+                            prompt = f"基于以下上下文回答问题：\n\n{context_str}\n\n问题：{question}\n\n回答："
+                        
+                        generated_responses = self.rag_output.generator.generate(texts=[prompt])
+                        # 修复：使用正确的RagOutput类型
+                        from xlm.dto.dto import RagOutput
+                        rag_output = RagOutput(
+                            retrieved_documents=all_docs[:self.rag_system.retriever_top_k],
+                            retriever_scores=all_scores[:self.rag_system.retriever_top_k],
+                            prompt=prompt,
+                            generated_responses=generated_responses,
+                            metadata=dict(
+                                # 修复：安全访问encoder_ch属性
+                                retriever_model_name=getattr(getattr(self.rag_system.retriever, 'encoder_ch', None), 'model_name', 'unknown') if hasattr(self.rag_system.retriever, 'encoder_ch') else 'unknown',
+                                top_k=self.rag_system.retriever_top_k,
+                                generator_model_name=self.rag_system.generator.model_name,
+                                prompt_template="Golden-ZH",
+                                question_language="zh"
+                            ),
+                        )
+                except Exception as e:
+                    print(f"优化检索失败: {e}")
+                    # 回退到传统RAG
+                    try:
+                        rag_output = self.rag_system.run(user_input=question, language=language)
+                    except Exception as e2:
+                        print(f"传统RAG也失败: {e2}")
+                        return f"系统错误: {str(e2)}", [], None
         else:
-            rag_output = self.rag_system.run(user_input=question, language=language)
+            try:
+                rag_output = self.rag_system.run(user_input=question, language=language)
+            except Exception as e:
+                print(f"传统RAG系统运行失败: {e}")
+                return f"系统错误: {str(e)}", [], None
         
         # 检测问题语言并打印数据源信息
         def is_chinese(text):
@@ -643,43 +737,39 @@ class OptimizedRagUI:
         except LangDetectException:
             print("Language detection failed, defaulting to English -> TAT_QA")
             detected_data_source = "TAT_QA"
+        except Exception as e:
+            print(f"Language detection error: {e}")
+            detected_data_source = "TAT_QA"
         
         # Apply reranker if enabled
         if use_reranker and rag_output.retrieved_documents and self.reranker is not None:
             print("Applying reranker...")
-            # Prepare documents for reranking
             docs_for_rerank = [(doc.content, doc.metadata.source) for doc in rag_output.retrieved_documents]
-            
-            # Rerank documents
             reranked_docs = self.reranker.rerank(
                 query=question,
-                documents=[doc[0] for doc in docs_for_rerank]  # 只传入文档内容，不传入元数据
+                documents=[doc[0] for doc in docs_for_rerank]
             )
-            
-            # Update retrieved documents with reranked results
             if reranked_docs:
-                # Create new document objects with reranked order
                 reranked_documents = []
                 reranked_scores = []
-                
                 for doc_content, score in reranked_docs:
-                    # Find original document
                     for orig_doc in rag_output.retrieved_documents:
                         if orig_doc.content == doc_content:
                             reranked_documents.append(orig_doc)
                             reranked_scores.append(score)
                             break
-                
                 rag_output.retrieved_documents = reranked_documents
                 rag_output.retriever_scores = reranked_scores
         
         # 检索结果去重，只显示前20条chunk
         unique_docs = []
-        seen_contents = set()
+        seen_hashes = set()
         for doc, score in zip(rag_output.retrieved_documents, rag_output.retriever_scores):
-            if doc.content not in seen_contents:
+            content = doc.content
+            h = hashlib.md5(content.encode('utf-8')).hexdigest()
+            if h not in seen_hashes:
                 unique_docs.append((doc, score))
-                seen_contents.add(doc.content)
+                seen_hashes.add(h)
             if len(unique_docs) >= 20:
                 break
         
@@ -703,7 +793,8 @@ class OptimizedRagUI:
         # Prepare context data
         context_data = []
         for doc, score in unique_docs:
-            context_data.append([f"{score:.4f}", doc.content])
+            content = doc.content
+            context_data.append([f"{score:.4f}", content])
         
         return answer, context_data, None
     

@@ -251,7 +251,7 @@ class FixedRetrievalTester:
         self.corpus_documents = []
         for item in data:
             if isinstance(item, dict):
-                content = item.get('context', item.get('content', ''))
+                content = item.get('context', '')
                 if content:
                     self.corpus_documents.append(content)
         
