@@ -529,12 +529,20 @@ class OptimizedRagUI:
                     llm_answer = results.get('llm_answer', '')
                     
                     for result in documents:
-                        # 使用完整的original_context而不是截断的context
                         content = result.get('original_context', result.get('summary', ''))
+                        # 健壮source
+                        source = str(
+                            result.get('company_name') or
+                            result.get('stock_code') or
+                            result.get('question') or
+                            result.get('context') or
+                            result.get('content') or
+                            "unknown"
+                        )
                         doc = DocumentWithMetadata(
                             content=content,
                             metadata=DocumentMetadata(
-                                source=result.get('company_name', 'Unknown'),
+                                source=source,
                                 created_at="",
                                 author="",
                                 language="chinese"
@@ -566,10 +574,19 @@ class OptimizedRagUI:
                         content = result.get('context', result.get('content', ''))
                         h = hashlib.md5(content.encode('utf-8')).hexdigest()
                         if h not in seen_hashes:
+                            # 健壮source
+                            source = str(
+                                result.get('company_name') or
+                                result.get('stock_code') or
+                                result.get('question') or
+                                result.get('context') or
+                                result.get('content') or
+                                "unknown"
+                            )
                             doc = DocumentWithMetadata(
                                 content=content,
                                 metadata=DocumentMetadata(
-                                    source=result.get('source', 'Unknown'),
+                                    source=source,
                                     created_at="",
                                     author="",
                                     language="english"
