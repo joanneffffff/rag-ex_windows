@@ -52,7 +52,7 @@ class RetrieverConfig:
     max_context_length: int = 100
     # 重排序相关配置
     retrieval_top_k: int = 100  # FAISS检索的top-k
-    rerank_top_k: int = 20      # 重排序后的top-k，从10增加到20
+    rerank_top_k: int = 10      # 重排序后的top-k，从10增加到20
     # 新增参数data/alphafin/alphafin_merged_generated_qa.json
     use_existing_embedding_index: bool = True  # 强制重新计算embedding，确保生成中文embedding
     max_alphafin_chunks: int = 1000000  # 限制AlphaFin数据chunk数量

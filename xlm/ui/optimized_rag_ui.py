@@ -544,7 +544,7 @@ class OptimizedRagUI:
                     
                     # 如果多阶段检索系统已经生成了答案，直接使用
                     if llm_answer:
-                        answer = f"[Multi-Stage Retrieval: ZH] {llm_answer}"
+                        answer = f"{llm_answer}"
                     else:
                         answer = "多阶段检索系统未生成答案"
                 else:
@@ -580,7 +580,7 @@ class OptimizedRagUI:
                         unique_docs.append((doc, result.get('combined_score', 0.0)))
                     
                     if llm_answer:
-                        answer = f"[Multi-Stage Retrieval: EN] {llm_answer}"
+                        answer = f"{llm_answer}"
                     else:
                         answer = "多阶段检索系统未生成答案"
                 else:
@@ -647,18 +647,9 @@ class OptimizedRagUI:
             return error_msg, f"<p style='color: red;'>{error_msg}</p>"
     
     def _generate_clickable_context_html(self, unique_docs: List[Tuple[DocumentWithMetadata, float]]) -> str:
-        """
-        生成可点击展开的HTML上下文内容
-        
-        Args:
-            unique_docs: 文档和分数的列表
-            
-        Returns:
-            HTML字符串
-        """
         if not unique_docs:
             return "<p>没有检索到相关文档。</p>"
-        
+
         html_parts = []
         html_parts.append("""
         <div style='font-family: Arial, sans-serif;'>
@@ -672,54 +663,48 @@ class OptimizedRagUI:
             font-size: 12px;
             color: white;
         }
-        .expand-btn { background-color: #28a745; }
-        .collapse-btn { background-color: #dc3545; }
+        .expand-btn { background-color: #4caf50; }
+        .collapse-btn { background-color: #757575; }
         .content-section { margin-bottom: 20px; border: 1px solid #ddd; border-radius: 8px; padding: 15px; background-color: #f9f9f9; }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        .score { background-color: #007bff; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .score { background-color: #f8fafc; color: #333; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
         .short-content, .full-content { margin: 0; line-height: 1.6; }
         .short-content { color: #555; }
         .full-content { color: #333; white-space: pre-wrap; }
         </style>
         """)
-        
+
         for i, (doc, score) in enumerate(unique_docs):
-            # 获取文档内容
             content = doc.content
             if not isinstance(content, str):
                 if isinstance(content, dict):
                     content = content.get('context', content.get('content', str(content)))
                 else:
                     content = str(content)
-            
-            # 生成短版本和完整版本
             short_content = content[:300] + "..." if len(content) > 300 else content
-            full_content = content.replace('\n', '<br>')
-            
-            # 创建可点击的HTML元素 - 使用CSS类名和更简单的JavaScript
+            full_content = content.replace('\n', '<br>')  # 不再截断
+
             html_parts.append(f"""
             <div class='content-section'>
                 <div class='header'>
                     <strong style='color: #333;'>文档 {i+1}</strong>
-                    <span class='score'>相似度: {score:.4f}</span>
+                    <span class='score'>score: {score:.4f}</span>
                 </div>
-                
                 <div class='short-content' id='short_{i}'>
                     <p>{short_content}</p>
                     <button class='expand-btn' onclick='document.getElementById("short_{i}").style.display="none"; document.getElementById("full_{i}").style.display="block";'>
-                        展开全文
+                        Read more
                     </button>
                 </div>
-                
                 <div class='full-content' id='full_{i}' style='display: none;'>
                     <p>{full_content}</p>
                     <button class='collapse-btn' onclick='document.getElementById("full_{i}").style.display="none"; document.getElementById("short_{i}").style.display="block";'>
-                        收起
+                        Show less 
                     </button>
                 </div>
             </div>
             """)
-        
+
         html_parts.append("</div>")
         return ''.join(html_parts)
     
