@@ -551,34 +551,32 @@ class OptimizedRagUI:
                     answer = "多阶段检索系统返回格式错误"
                 
             elif language == 'en' and hasattr(self, 'english_retrieval_system') and self.english_retrieval_system:
-                # 使用多阶段检索系统处理英文查询
                 print("使用多阶段检索系统处理英文查询...")
-                
                 results = self.english_retrieval_system.search(
                     query=question,
                     top_k=20
                 )
-                
+                # 去重逻辑
                 unique_docs = []
-                
+                seen_hashes = set()
                 if isinstance(results, dict) and 'retrieved_documents' in results:
                     documents = results['retrieved_documents']
                     llm_answer = results.get('llm_answer', '')
-                    
                     for result in documents:
-                        # 使用完整的context而不是截断的context
                         content = result.get('context', result.get('content', ''))
-                        doc = DocumentWithMetadata(
-                            content=content,
-                            metadata=DocumentMetadata(
-                                source=result.get('source', 'Unknown'),
-                                created_at="",
-                                author="",
-                                language="english"
+                        h = hashlib.md5(content.encode('utf-8')).hexdigest()
+                        if h not in seen_hashes:
+                            doc = DocumentWithMetadata(
+                                content=content,
+                                metadata=DocumentMetadata(
+                                    source=result.get('source', 'Unknown'),
+                                    created_at="",
+                                    author="",
+                                    language="english"
+                                )
                             )
-                        )
-                        unique_docs.append((doc, result.get('combined_score', 0.0)))
-                    
+                            unique_docs.append((doc, result.get('combined_score', 0.0)))
+                            seen_hashes.add(h)
                     if llm_answer:
                         answer = f"{llm_answer}"
                     else:
@@ -667,7 +665,7 @@ class OptimizedRagUI:
         .collapse-btn { background-color: #757575; }
         .content-section { margin-bottom: 20px; border: 1px solid #ddd; border-radius: 8px; padding: 15px; background-color: #f9f9f9; }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        .score { background-color: #f8fafc; color: #333; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .score { background-color: #ff9800; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
         .short-content, .full-content { margin: 0; line-height: 1.6; }
         .short-content { color: #555; }
         .full-content { color: #333; white-space: pre-wrap; }
@@ -682,7 +680,7 @@ class OptimizedRagUI:
                 else:
                     content = str(content)
             short_content = content[:300] + "..." if len(content) > 300 else content
-            full_content = content.replace('\n', '<br>')  # 不再截断
+            full_content = content.replace('\n', '<br>')  # 保证完整内容
 
             html_parts.append(f"""
             <div class='content-section'>
@@ -704,7 +702,6 @@ class OptimizedRagUI:
                 </div>
             </div>
             """)
-
         html_parts.append("</div>")
         return ''.join(html_parts)
     
