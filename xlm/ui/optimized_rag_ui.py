@@ -18,10 +18,14 @@ import hashlib
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from xlm.dto.dto import DocumentWithMetadata, DocumentMetadata
+from xlm.dto.dto import DocumentWithMetadata, DocumentMetadata, RagOutput
 from xlm.components.rag_system.rag_system import RagSystem
 from xlm.components.generator.generator import Generator
+from xlm.components.retriever.retriever import Retriever
 from xlm.components.retriever.reranker import QwenReranker
+from xlm.components.retriever.bilingual_retriever import BilingualRetriever
+from xlm.components.encoder.finbert import FinbertEncoder
+from xlm.utils.dual_language_loader import DualLanguageLoader
 from xlm.utils.visualizer import Visualizer
 from xlm.registry.retriever import load_enhanced_retriever
 from xlm.registry.generator import load_generator
@@ -29,13 +33,11 @@ from config.parameters import Config, EncoderConfig, RetrieverConfig, ModalityCo
 
 # 尝试导入多阶段检索系统
 try:
-    sys.path.append(str(Path(__file__).parent.parent.parent / "alphafin_data_process"))
-    from multi_stage_retrieval_final import MultiStageRetrievalSystem
+    from alphafin_data_process.multi_stage_retrieval_final import MultiStageRetrievalSystem
     MULTI_STAGE_AVAILABLE = True
-except ImportError as e:
-    print(f"多阶段检索系统导入失败: {e}")
+except ImportError:
+    print("警告: 多阶段检索系统不可用，将使用传统检索")
     MULTI_STAGE_AVAILABLE = False
-    MultiStageRetrievalSystem = None
 
 def try_load_qwen_reranker(model_name, cache_dir=None):
     """尝试加载Qwen重排序器，支持GPU 0和CPU回退"""
@@ -171,17 +173,21 @@ class OptimizedRagUI:
         # 使用config中的平台感知配置
         config = Config()
         
-        # 初始化多阶段检索系统（用于中文查询）
+        # 清理GPU内存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            print(f"GPU内存清理完成")
+        
+        # 初始化多阶段检索系统
         print("\nStep 1.0. Initializing Multi-Stage Retrieval System for Chinese queries...")
-        self.multi_stage_system = None
-        if MULTI_STAGE_AVAILABLE and MultiStageRetrievalSystem:
+        if MULTI_STAGE_AVAILABLE:
             try:
                 # 中文数据路径
                 chinese_data_path = Path("data/alphafin/alphafin_merged_generated_qa.json")
                 
                 if chinese_data_path.exists():
                     print("✅ 初始化中文多阶段检索系统...")
-                    self.multi_stage_system = MultiStageRetrievalSystem(
+                    self.chinese_retrieval_system = MultiStageRetrievalSystem(
                         data_path=chinese_data_path,
                         dataset_type="chinese",
                         use_existing_config=True
@@ -189,187 +195,155 @@ class OptimizedRagUI:
                     print("✅ 中文多阶段检索系统初始化完成")
                 else:
                     print(f"❌ 中文数据文件不存在: {chinese_data_path}")
-                    self.multi_stage_system = None
-                    
+                    self.chinese_retrieval_system = None
+                
+                # 英文数据路径（如果有的话）
+                english_data_path = Path("data/tatqa/processed_data.json")  # 需要预处理
+                if english_data_path.exists():
+                    print("✅ 初始化英文多阶段检索系统...")
+                    self.english_retrieval_system = MultiStageRetrievalSystem(
+                        data_path=english_data_path,
+                        dataset_type="english",
+                        use_existing_config=True
+                    )
+                    print("✅ 英文多阶段检索系统初始化完成")
+                else:
+                    print(f"⚠️ 英文数据文件不存在: {english_data_path}")
+                    self.english_retrieval_system = None
+                
             except Exception as e:
                 print(f"❌ 多阶段检索系统初始化失败: {e}")
-                self.multi_stage_system = None
-        else:
-            print("❌ 多阶段检索系统不可用，将使用传统RAG系统")
-            self.multi_stage_system = None
+                self.chinese_retrieval_system = None
+                self.english_retrieval_system = None
         
-        # 使用优化的数据加载器，实现文档级别chunking
         print("\nStep 1.1. Loading data with optimized chunking...")
-        try:
-            from xlm.utils.optimized_data_loader import OptimizedDataLoader
-            
-            # 对于AlphaFin数据，使用summary字段而不是chunks
-            data_loader = OptimizedDataLoader(
-                data_dir="data",
-                max_samples=config.data.max_samples,
-                chinese_document_level=True,  # 使用文档级别，避免过度chunking
-                english_chunk_level=True      # 英文保持chunk级别
-            )
-            
-            # 获取处理后的文档
-            chinese_docs = data_loader.chinese_docs
-            english_chunks = data_loader.english_docs
-            
-            # 对于中文数据，提取summary字段用于传统RAG
-            chinese_summaries = []
-            for doc in chinese_docs:
-                # 尝试从文档内容中提取summary信息
-                content = doc.content
-                if isinstance(content, str) and len(content) > 0:
-                    # 如果内容太长，取前500字符作为summary
-                    summary = content[:500] + "..." if len(content) > 500 else content
-                    # 创建新的DocumentWithMetadata对象
-                    summary_doc = DocumentWithMetadata(
-                        content=summary,
-                        metadata=DocumentMetadata(
-                            source=doc.metadata.source,
-                            created_at=doc.metadata.created_at,
-                            author=doc.metadata.author,
-                            language="chinese"
-                        )
-                    )
-                    chinese_summaries.append(summary_doc)
-            
-            # 显示统计信息
-            stats = data_loader.get_statistics()
-            print(f"✅ 文档级别处理完成:")
-            print(f"   中文文档数: {stats['chinese_docs']}")
-            print(f"   英文文档数: {stats['english_docs']}")
-            print(f"   中文平均长度: {stats['chinese_avg_length']:.2f}")
-            print(f"   英文平均长度: {stats['english_avg_length']:.2f}")
-            print(f"   中文summary数: {len(chinese_summaries)}")
-            
-        except Exception as e:
-            print(f"❌ 优化数据加载器失败: {e}")
-            print("回退到传统数据加载方式...")
-            
-            # 回退到传统方式
-            from xlm.utils.dual_language_loader import DualLanguageLoader
-            
-            data_loader = DualLanguageLoader()
-            chinese_docs, english_docs = data_loader.load_dual_language_data(
-                chinese_data_path=config.data.chinese_data_path,
-                english_data_path=config.data.english_data_path
-            )
-            
-            print(f"Loaded {len(chinese_docs)} Chinese documents")
-            print(f"Loaded {len(english_docs)} English documents")
-            
-            # 使用传统chunking
-            print("\nStep 1.1. Applying traditional document chunking...")
-            chinese_chunks = self._chunk_documents_advanced(chinese_docs)
-            english_chunks = self._chunk_documents_simple(english_docs, chunk_size=512, overlap=50)
-            
-            # 限制AlphaFin数据chunk数量，避免200k+ chunks影响测试
-            if len(chinese_chunks) > self.max_alphafin_chunks:
-                print(f"Limiting Chinese chunks from {len(chinese_chunks)} to {self.max_alphafin_chunks} for testing...")
-                chinese_chunks = chinese_chunks[:self.max_alphafin_chunks]
-            
-            # 对于传统方式，也提取summary
-            chinese_summaries = []
-            for doc in chinese_chunks:
-                content = doc.content
-                if isinstance(content, str) and len(content) > 0:
-                    summary = content[:500] + "..." if len(content) > 500 else content
-                    # 创建新的DocumentWithMetadata对象
-                    summary_doc = DocumentWithMetadata(
-                        content=summary,
-                        metadata=DocumentMetadata(
-                            source=doc.metadata.source,
-                            created_at=doc.metadata.created_at,
-                            author=doc.metadata.author,
-                            language="chinese"
-                        )
-                    )
-                    chinese_summaries.append(summary_doc)
+        # 加载双语言数据 - 使用配置文件中的路径
+        data_loader = DualLanguageLoader()
         
-        print(f"Final summary count: {len(chinese_summaries)} Chinese summaries, {len(english_chunks)} English chunks")
+        # 分别加载中文和英文数据
+        chinese_docs = []
+        english_docs = []
         
-        # 直接创建BilingualRetriever，embedding基于chunk
-        from xlm.components.retriever.bilingual_retriever import BilingualRetriever
-        from xlm.components.encoder.finbert import FinbertEncoder
+        # 加载中文数据
+        if config.data.chinese_data_path:
+            print(f"加载中文数据: {config.data.chinese_data_path}")
+            if config.data.chinese_data_path.endswith('.json'):
+                chinese_docs = data_loader.load_alphafin_data(config.data.chinese_data_path)
+            elif config.data.chinese_data_path.endswith('.jsonl'):
+                chinese_docs = data_loader.load_jsonl_data(config.data.chinese_data_path, 'chinese')
         
-        # 使用配置中的模型路径，并转换为绝对路径
-        chinese_model_path = config.encoder.chinese_model_path
-        english_model_path = config.encoder.english_model_path
+        # 加载英文数据（使用context-only方法）
+        if config.data.english_data_path:
+            print(f"加载英文数据: {config.data.english_data_path}")
+            english_docs = data_loader.load_tatqa_context_only(config.data.english_data_path)
         
-        if not Path(chinese_model_path).is_absolute():
-            chinese_model_path = str(Path(__file__).parent.parent.parent / chinese_model_path)
-        if not Path(english_model_path).is_absolute():
-            english_model_path = str(Path(__file__).parent.parent.parent / english_model_path)
+        print(f"数据加载完成: {len(chinese_docs)} 个中文文档, {len(english_docs)} 个英文文档")
         
-        print(f"\nStep 2. Loading Chinese encoder ({chinese_model_path})...")
-        encoder_ch = FinbertEncoder(
-            model_name=chinese_model_path,
-            cache_dir=config.encoder.cache_dir,  # 使用encoder的缓存目录
-        )
-        print(f"Step 3. Loading English encoder ({english_model_path})...")
-        encoder_en = FinbertEncoder(
-            model_name=english_model_path,
-            cache_dir=config.encoder.cache_dir,  # 使用encoder的缓存目录
+        # 清理内存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        print("\nStep 2. Loading Chinese encoder...")
+        print(f"Step 2. Loading Chinese encoder ({config.encoder.chinese_model_path})...")
+        self.encoder_ch = FinbertEncoder(
+            model_name=config.encoder.chinese_model_path,
+            cache_dir=config.encoder.cache_dir,
         )
         
-        # 根据use_existing_embedding_index参数决定是否使用现有索引
-        if self.use_existing_embedding_index:
-            print("Using existing embedding index (if available)...")
-            cache_dir = config.encoder.cache_dir  # 使用encoder的缓存目录
-        else:
+        print("\nStep 3. Loading English encoder...")
+        print(f"Step 3. Loading English encoder ({config.encoder.english_model_path})...")
+        self.encoder_en = FinbertEncoder(
+            model_name=config.encoder.english_model_path,
+            cache_dir=config.encoder.cache_dir,
+        )
+        
+        # 清理内存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
+        # 强制重新计算嵌入
+        if self.use_existing_embedding_index is False:
             print("Forcing to recompute embeddings (ignoring existing cache)...")
-            # 仍然使用models/embedding_cache，但会重新计算嵌入
-            cache_dir = config.encoder.cache_dir
-            print(f"Using cache directory: {cache_dir} (will recompute embeddings)")
+        else:
+            print("Using existing embedding index (if available)...")
         
         print(f"[UI DEBUG] self.use_existing_embedding_index={self.use_existing_embedding_index}")
-        print("=== BEFORE BilingualRetriever ===", flush=True)
+        
+        print("=== BEFORE BilingualRetriever ===")
         self.retriever = BilingualRetriever(
-            encoder_en=encoder_en,
-            encoder_ch=encoder_ch,
-            corpus_documents_en=english_chunks,
-            corpus_documents_ch=chinese_summaries,
+            encoder_en=self.encoder_en,
+            encoder_ch=self.encoder_ch,
+            corpus_documents_en=english_docs,
+            corpus_documents_ch=chinese_docs,
             use_faiss=self.use_faiss,
-            use_gpu=False,
-            batch_size=8,
-            cache_dir=cache_dir,
+            use_gpu=True,
+            batch_size=32,
+            cache_dir=config.encoder.cache_dir,
             use_existing_embedding_index=self.use_existing_embedding_index
         )
-        print("=== AFTER BilingualRetriever ===", flush=True)
+        print("=== AFTER BilingualRetriever ===")
         print(f"[UI DEBUG] BilingualRetriever created with use_existing_embedding_index={self.use_existing_embedding_index}")
         
-        if self.use_faiss:
-            print("Step 3.1. Initializing FAISS index...")
-            self._init_faiss()
-            print("FAISS index initialized successfully")
+        # 清理内存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
-        # Initialize reranker if enabled
+        print("\nStep 3.1. Initializing FAISS index...")
+        self._init_faiss()
+        
+        print("\nStep 4. Loading reranker...")
         if self.enable_reranker:
-            print("\nStep 4. Loading reranker...")
             self.reranker = try_load_qwen_reranker(
-                model_name="Qwen/Qwen3-Reranker-0.6B",
-                cache_dir=config.reranker.cache_dir  # 使用reranker的缓存目录
+                model_name=config.reranker.model_name,
+                cache_dir=config.reranker.cache_dir
             )
+            if self.reranker is None:
+                print("⚠️ 重排序器加载失败，将禁用重排序功能")
+                self.enable_reranker = False
         else:
             self.reranker = None
         
+        # 清理内存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        
         print("\nStep 5. Loading generator...")
-        self.generator = load_generator(
-            generator_model_name=self.generator_model_name,
-            use_local_llm=True,
-            use_gpu=True,  # 启用GPU
-            gpu_device="cuda:1",  # 使用GPU 1
-            cache_dir=config.generator.cache_dir  # 使用generator的缓存目录
-        )
+        # 现在GPU内存充足，使用GPU 1加载生成器
+        try:
+            print("GPU内存充足，使用GPU 1加载生成器...")
+            self.generator = load_generator(
+                generator_model_name=config.generator.model_name,
+                use_local_llm=True,
+                use_gpu=True,  # 使用GPU
+                gpu_device="cuda:1",  # 使用GPU 1
+                cache_dir=config.generator.cache_dir
+            )
+            print("✅ 生成器GPU模式加载成功")
+            
+        except Exception as e:
+            print(f"❌ 生成器GPU模式加载失败: {e}")
+            print("回退到CPU模式...")
+            try:
+                self.generator = load_generator(
+                    generator_model_name=config.generator.model_name,
+                    use_local_llm=True,
+                    use_gpu=False,  # 回退到CPU
+                    cache_dir=config.generator.cache_dir
+                )
+                print("✅ 生成器CPU模式加载成功")
+            except Exception as e2:
+                print(f"❌ 生成器CPU模式也失败: {e2}")
+                raise e2
+        
+        # 清理内存
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         print("\nStep 6. Initializing RAG system...")
-        
         self.rag_system = RagSystem(
             retriever=self.retriever,
             generator=self.generator,
-            retriever_top_k=20  # 增加到20，从config读取retriever_top_k
+            retriever_top_k=20
         )
         
         print("\nStep 7. Loading visualizer...")
@@ -477,326 +451,78 @@ class OptimizedRagUI:
         question: str,
         datasource: str,
         reranker_checkbox: bool
-    ) -> tuple[str, List[List[str]], Optional[gr.Plot]]:
-        """Process user question and return results"""
+    ) -> tuple[str, List[List[str]]]:
         if not question.strip():
-            return "Please enter a question.", [], None
-        print(f"\nProcessing question: {question}")
-        print(f"Data source: {datasource}")
+            return "请输入问题", []
         
-        # Detect language and pass to rag_system
+        # 检测语言
         try:
-            from langdetect import detect
             lang = detect(question)
-            # 中文字符兜底
-            def is_chinese(text):
-                return len([c for c in text if '\u4e00' <= c <= '\u9fff']) > max(1, len(text) // 6)
-            if lang.startswith('zh') or (lang == 'ko' and is_chinese(question)) or is_chinese(question):
-                language = 'zh'
-            else:
-                language = 'en'
-        except Exception as e:
-            print(f"Language detection failed: {e}, fallback to English.")
+            language = 'zh' if lang.startswith('zh') else 'en'
+        except:
             language = 'en'
-        print(f"Detected language: {language}")
         
-        # 根据语言选择检索系统
-        if language == 'zh' and self.multi_stage_system:
-            print("🔍 使用中文多阶段检索系统...")
-            return self._process_chinese_with_multi_stage(question, reranker_checkbox)
-        else:
-            print("🔍 使用传统RAG系统...")
-            return self._process_with_traditional_rag(question, language, reranker_checkbox)
-    
-    def _process_chinese_with_multi_stage(self, question: str, reranker_checkbox: bool) -> tuple[str, List[List[str]], Optional[gr.Plot]]:
-        """使用多阶段检索系统处理中文查询"""
-        if not self.multi_stage_system:
-            print("❌ 多阶段检索系统未初始化，回退到传统检索")
-            return self._process_with_traditional_rag(question, 'zh', reranker_checkbox)
+        # 检测数据源
+        detected_data_source = self._detect_data_source(question, language)
+        
+        # 使用重排序器
+        use_reranker = reranker_checkbox
+        
         try:
-            # 尝试提取公司名称和股票代码用于元数据过滤
-            company_name = None
-            stock_code = None
+            # 运行RAG系统
+            rag_output = self.rag_system.run(user_input=question, language=language)
             
-            # 简单的实体提取
-            import re
-            # 提取股票代码
-            stock_match = re.search(r'\((\d{6})\)', question)
-            if stock_match:
-                stock_code = stock_match.group(1)
+            # 去重处理
+            unique_docs = []
+            seen_hashes = set()
             
-            # 提取公司名称（简单实现）
-            company_patterns = [
-                r'([^，。？\s]+(?:股份|集团|公司|有限|科技|网络|银行|证券|保险))',
-                r'([^，。？\s]+(?:股份|集团|公司|有限|科技|网络|银行|证券|保险)[^，。？\s]*)'
-            ]
-            
-            for pattern in company_patterns:
-                company_match = re.search(pattern, question)
-                if company_match:
-                    company_name = company_match.group(1)
+            for doc, score in zip(rag_output.retrieved_documents, rag_output.retriever_scores):
+                content = doc.content
+                h = hashlib.md5(content.encode('utf-8')).hexdigest()
+                if h not in seen_hashes:
+                    unique_docs.append((doc, score))
+                    seen_hashes.add(h)
+                if len(unique_docs) >= 20:
                     break
             
-            # 执行多阶段检索
-            results = self.multi_stage_system.search(
-                query=question,
-                company_name=company_name,
-                stock_code=stock_code,
-                top_k=20
-            )
+            # Prepare answer
+            answer = rag_output.generated_responses[0] if rag_output.generated_responses else "Unable to generate answer"
             
-            # 转换为DocumentWithMetadata格式
-            retrieved_documents = []
-            retriever_scores = []
+            # Add reranker info to answer if used
+            if use_reranker:
+                answer = f"[Reranker: Enabled] {answer}"
+            else:
+                answer = f"[Reranker: Disabled] {answer}"
             
-            # 检查results的格式
-            if isinstance(results, dict) and 'retrieved_documents' in results:
-                documents = results['retrieved_documents']
-                llm_answer = results.get('llm_answer', '')
-                for result in documents:
-                    doc = DocumentWithMetadata(
-                        content=result.get('original_context', result.get('summary', '')),
-                        metadata=DocumentMetadata(
-                            source=result.get('company_name', 'Unknown'),
-                            created_at="",
-                            author="",
-                            language="chinese"
-                        )
-                    )
-                    retrieved_documents.append(doc)
-                    retriever_scores.append(result.get('combined_score', 0.0))
-                print(f"✅ 多阶段检索完成，找到 {len(retrieved_documents)} 条结果")
-                # === 新增：original_context去重 ===
-                unique_contexts = {}
-                for doc, score in zip(retrieved_documents, retriever_scores):
-                    context = doc.content
-                    h = hashlib.md5(context.encode('utf-8')).hexdigest()
-                    if h not in unique_contexts or score > unique_contexts[h][1]:
-                        unique_contexts[h] = (doc, score)
-                # 只保留去重后的内容，按分数排序
-                dedup_docs = sorted(unique_contexts.values(), key=lambda x: -x[1])
-                # 如果多阶段检索系统已经生成了答案，直接使用
-                if llm_answer:
-                    context_data = []
-                    for doc, score in dedup_docs[:20]:
-                        context_data.append([f"{score:.4f}", doc.content[:500] + "..." if len(doc.content) > 500 else doc.content])
-                    answer = f"[Multi-Stage Retrieval: ZH] {llm_answer}"
-                    return answer, context_data, None
-            else:
-                for result in results:
-                    doc = DocumentWithMetadata(
-                        content=result.get('original_context', result.get('summary', '')),
-                        metadata=DocumentMetadata(
-                            source=result.get('company_name', 'Unknown'),
-                            created_at="",
-                            author="",
-                            language="chinese"
-                        )
-                    )
-                    retrieved_documents.append(doc)
-                    retriever_scores.append(result.get('combined_score', 0.0))
-            if retrieved_documents:
-                # === 新增：original_context去重 ===
-                unique_contexts = {}
-                for doc, score in zip(retrieved_documents, retriever_scores):
-                    context = doc.content
-                    h = hashlib.md5(context.encode('utf-8')).hexdigest()
-                    if h not in unique_contexts or score > unique_contexts[h][1]:
-                        unique_contexts[h] = (doc, score)
-                dedup_docs = sorted(unique_contexts.values(), key=lambda x: -x[1])
-                context_str = "\n\n".join([doc.content for doc, _ in dedup_docs[:10]])
-                from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_ZH
-                prompt = PROMPT_TEMPLATE_ZH.format(context=context_str, question=question)
-                generated_responses = self.rag_system.generator.generate(texts=[prompt])
-                answer = generated_responses[0] if generated_responses else "Unable to generate answer"
-                context_data = []
-                for doc, score in dedup_docs[:20]:
-                    context_data.append([f"{score:.4f}", doc.content[:500] + "..." if len(doc.content) > 500 else doc.content])
-                answer = f"[Multi-Stage Retrieval: ZH] {answer}"
-                return answer, context_data, None
-            else:
-                return "No relevant documents found.", [], None
-        except Exception as e:
-            print(f"❌ 多阶段检索失败: {e}")
-            print("回退到传统检索...")
-            return self._process_with_traditional_rag(question, 'zh', reranker_checkbox)
-    
-    def _process_with_traditional_rag(self, question: str, language: str, reranker_checkbox: bool) -> tuple[str, List[List[str]], Optional[gr.Plot]]:
-        """使用传统RAG系统处理查询"""
-        # 根据数据源选择决定是否使用重排序器
-        use_reranker = reranker_checkbox and self.enable_reranker and self.reranker is not None
-        
-        # === 新增：仅对中文query启用优化检索 ===
-        rag_output = None
-        if language == 'zh':
-            try:
-                from simple_query_test import SimpleQueryOptimizer
-            except ImportError:
-                print("simple_query_test.py未找到或导入失败，回退到普通检索。")
-                try:
-                    rag_output = self.rag_system.run(user_input=question, language=language)
-                except Exception as e:
-                    print(f"传统RAG系统运行失败: {e}")
-                    # 如果传统RAG也失败，返回错误信息
-                    return f"系统错误: {str(e)}", [], None
-            else:
-                try:
-                    optimizer = SimpleQueryOptimizer()
-                    entity = optimizer.extract_entities(question)
-                    query_variants = optimizer.create_optimized_queries(question, entity)
-                    all_docs = []
-                    all_scores = []
-                    seen_doc_ids = set()
-                    for q in query_variants:
-                        docs, scores = self.rag_system.retriever.retrieve(
-                            text=q, top_k=self.rag_system.retriever_top_k, return_scores=True, language=language
-                        )
-                        for doc, score in zip(docs, scores):
-                            doc_id = getattr(doc, 'id', None)
-                            if doc_id not in seen_doc_ids:
-                                all_docs.append(doc)
-                                all_scores.append(score)
-                                seen_doc_ids.add(doc_id)
-                        if len(all_docs) >= self.rag_system.retriever_top_k:
-                            break
-                    # 构造RagOutput前，增加实体过滤
-                    def filter_by_entity(docs, scores, entity):
-                        filtered_docs = []
-                        filtered_scores = []
-                        for doc, score in zip(docs, scores):
-                            if entity.stock_code and entity.stock_code in doc.content:
-                                filtered_docs.append(doc)
-                                filtered_scores.append(score)
-                            elif entity.company_name and entity.company_name in doc.content:
-                                filtered_docs.append(doc)
-                                filtered_scores.append(score)
-                        if filtered_docs:
-                            return filtered_docs, filtered_scores
-                        else:
-                            return docs, scores
-                    all_docs, all_scores = filter_by_entity(all_docs, all_scores, entity)
-                    # 构造RagOutput
-                    if not all_docs:
-                        rag_output = self.rag_system.run(user_input=question, language=language)
+            # Prepare context data
+            context_data = []
+            for doc, score in unique_docs:
+                # 统一只显示content字段，不显示question和answer
+                content = doc.content
+                # 确保content是字符串类型
+                if not isinstance(content, str):
+                    if isinstance(content, dict):
+                        # 如果是字典，尝试提取context或content字段
+                        content = content.get('context', content.get('content', str(content)))
                     else:
-                        # 只生成一次prompt和答案
-                        context_str = "\n\n".join([doc.content for doc in all_docs[:self.rag_system.retriever_top_k]])
-                        # 修复：从rag_system模块导入prompt模板
-                        from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_ZH
-                        try:
-                            prompt = PROMPT_TEMPLATE_ZH.format(context=context_str, question=question)
-                        except Exception as e:
-                            print(f"Prompt格式化失败: {e}")
-                            # 使用简单的prompt作为回退
-                            prompt = f"基于以下上下文回答问题：\n\n{context_str}\n\n问题：{question}\n\n回答："
-                        
-                        generated_responses = self.rag_output.generator.generate(texts=[prompt])
-                        # 修复：使用正确的RagOutput类型
-                        from xlm.dto.dto import RagOutput
-                        rag_output = RagOutput(
-                            retrieved_documents=all_docs[:self.rag_system.retriever_top_k],
-                            retriever_scores=all_scores[:self.rag_system.retriever_top_k],
-                            prompt=prompt,
-                            generated_responses=generated_responses,
-                            metadata=dict(
-                                # 修复：安全访问encoder_ch属性
-                                retriever_model_name=getattr(getattr(self.rag_system.retriever, 'encoder_ch', None), 'model_name', 'unknown') if hasattr(self.rag_system.retriever, 'encoder_ch') else 'unknown',
-                                top_k=self.rag_system.retriever_top_k,
-                                generator_model_name=self.rag_system.generator.model_name,
-                                prompt_template="Golden-ZH",
-                                question_language="zh"
-                            ),
-                        )
-                except Exception as e:
-                    print(f"优化检索失败: {e}")
-                    # 回退到传统RAG
-                    try:
-                        rag_output = self.rag_system.run(user_input=question, language=language)
-                    except Exception as e2:
-                        print(f"传统RAG也失败: {e2}")
-                        return f"系统错误: {str(e2)}", [], None
-        else:
-            try:
-                rag_output = self.rag_system.run(user_input=question, language=language)
-            except Exception as e:
-                print(f"传统RAG系统运行失败: {e}")
-                return f"系统错误: {str(e)}", [], None
-        
-        # 检测问题语言并打印数据源信息
-        def is_chinese(text):
-            return len(re.findall(r'[\u4e00-\u9fff]', text)) > max(1, len(text) // 6)
-        try:
-            from langdetect import detect
-            lang = detect(question)
-            # 修正：如果检测为韩文但内容明显是中文，强制设为中文
-            if lang == 'ko' and is_chinese(question):
-                lang = 'zh-cn'
-            is_chinese_q = lang.startswith('zh')
-            detected_data_source = "AlphaFin" if is_chinese_q else "TAT_QA"
-            print(f"Detected language: {lang} -> Using data source: {detected_data_source}")
-        except LangDetectException:
-            print("Language detection failed, defaulting to English -> TAT_QA")
-            detected_data_source = "TAT_QA"
+                        content = str(content)
+                
+                # 截断过长的内容
+                display_content = content[:500] + "..." if len(content) > 500 else content
+                context_data.append([f"{score:.4f}", display_content])
+            
+            return answer, context_data
+            
         except Exception as e:
-            print(f"Language detection error: {e}")
-            detected_data_source = "TAT_QA"
-        
-        # Apply reranker if enabled
-        if use_reranker and rag_output.retrieved_documents and self.reranker is not None:
-            print("Applying reranker...")
-            docs_for_rerank = [(doc.content, doc.metadata.source) for doc in rag_output.retrieved_documents]
-            reranked_docs = self.reranker.rerank(
-                query=question,
-                documents=[doc[0] for doc in docs_for_rerank]
-            )
-            if reranked_docs:
-                reranked_documents = []
-                reranked_scores = []
-                for doc_content, score in reranked_docs:
-                    for orig_doc in rag_output.retrieved_documents:
-                        if orig_doc.content == doc_content:
-                            reranked_documents.append(orig_doc)
-                            reranked_scores.append(score)
-                            break
-                rag_output.retrieved_documents = reranked_documents
-                rag_output.retriever_scores = reranked_scores
-        
-        # 检索结果去重，只显示前20条chunk
-        unique_docs = []
-        seen_hashes = set()
-        for doc, score in zip(rag_output.retrieved_documents, rag_output.retriever_scores):
-            content = doc.content
-            h = hashlib.md5(content.encode('utf-8')).hexdigest()
-            if h not in seen_hashes:
-                unique_docs.append((doc, score))
-                seen_hashes.add(h)
-            if len(unique_docs) >= 20:
-                break
-        
-        # Prepare answer
-        answer = rag_output.generated_responses[0] if rag_output.generated_responses else "Unable to generate answer"
-        
-        # 调试信息：打印prompt和语言信息
-        print(f"\n=== DEBUG INFO ===")
-        print(f"Question language: {lang}")
-        print(f"Data source: {detected_data_source}")
-        print(f"Prompt template used: {rag_output.metadata.get('prompt_template', 'Unknown')}")
-        print(f"Generated response: {answer[:200]}...")  # 只打印前200个字符
-        print(f"=== END DEBUG ===\n")
-        
-        # Add reranker info to answer if used
-        if use_reranker:
-            answer = f"[Reranker: Enabled] {answer}"
+            error_msg = f"处理问题时出错: {str(e)}"
+            return error_msg, []
+    
+    def _detect_data_source(self, question: str, language: str) -> str:
+        """检测数据源类型"""
+        if language == 'zh':
+            return "AlphaFin"
         else:
-            answer = f"[Reranker: Disabled] {answer}"
-        
-        # Prepare context data
-        context_data = []
-        for doc, score in unique_docs:
-            content = doc.content
-            context_data.append([f"{score:.4f}", content])
-        
-        return answer, context_data, None
+            return "TAT_QA"
     
     def launch(self, share: bool = False):
         """Launch UI interface"""

@@ -9,6 +9,16 @@ class DocumentMetadata(BaseModel):
     created_at: str = ""
     author: str = ""
     language: str = ""
+    # AlphaFin数据集专用字段
+    doc_id: Optional[str] = None
+    stock_name: Optional[str] = None
+    question: Optional[str] = None
+    answer: Optional[str] = None
+    # 新增字段
+    summary: Optional[str] = None
+    company_name: Optional[str] = None
+    stock_code: Optional[str] = None
+    report_date: Optional[str] = None
 
 
 class DocumentWithMetadata(BaseModel):

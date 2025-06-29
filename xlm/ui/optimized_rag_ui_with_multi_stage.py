@@ -6,6 +6,7 @@ Optimized RAG UI with Multi-Stage Retrieval System Integration
 import os
 import sys
 import re
+import hashlib
 from pathlib import Path
 from typing import List, Optional, Tuple
 import gradio as gr
@@ -14,25 +15,26 @@ import torch
 import faiss
 from langdetect import detect, LangDetectException
 
-# Add parent directory to path
-sys.path.append(str(Path(__file__).parent.parent.parent))
+# 添加项目根目录到路径
+project_root = Path(__file__).parent.parent.parent
+sys.path.append(str(project_root))
 
 from xlm.dto.dto import DocumentWithMetadata, DocumentMetadata, RagOutput
 from xlm.components.rag_system.rag_system import RagSystem
 from xlm.components.generator.generator import Generator
+from xlm.components.retriever.retriever import Retriever
 from xlm.components.retriever.reranker import QwenReranker
 from xlm.utils.visualizer import Visualizer
 from xlm.registry.retriever import load_enhanced_retriever
 from xlm.registry.generator import load_generator
 from config.parameters import Config, EncoderConfig, RetrieverConfig, ModalityConfig, EMBEDDING_CACHE_DIR, RERANKER_CACHE_DIR
 
-# 导入多阶段检索系统
+# 尝试导入多阶段检索系统
 try:
-    sys.path.append(str(Path(__file__).parent.parent.parent / "alphafin_data_process"))
-    from multi_stage_retrieval_final import MultiStageRetrievalSystem
+    from alphafin_data_process.multi_stage_retrieval_final import MultiStageRetrievalSystem
     MULTI_STAGE_AVAILABLE = True
-except ImportError as e:
-    print(f"多阶段检索系统导入失败: {e}")
+except ImportError:
+    print("警告: 多阶段检索系统不可用，将使用传统检索")
     MULTI_STAGE_AVAILABLE = False
 
 def try_load_qwen_reranker(model_name, cache_dir=None):
@@ -160,6 +162,34 @@ class OptimizedRagUIWithMultiStage:
         # 使用config中的平台感知配置
         config = Config()
         
+        # 初始化传统RAG系统作为回退
+        print("Step 2. Initializing Traditional RAG System as fallback...")
+        try:
+            # 加载检索器
+            self.retriever = load_enhanced_retriever(
+                config=config
+            )
+            
+            # 加载生成器
+            self.generator = load_generator(
+                generator_model_name=config.generator.model_name,
+                use_local_llm=True,
+                use_gpu=True,
+                gpu_device="cuda:1",
+                cache_dir=config.generator.cache_dir
+            )
+            
+            # 初始化RAG系统
+            self.rag_system = RagSystem(
+                retriever=self.retriever,
+                generator=self.generator,
+                retriever_top_k=20
+            )
+            print("✅ 传统RAG系统初始化完成")
+        except Exception as e:
+            print(f"❌ 传统RAG系统初始化失败: {e}")
+            self.rag_system = None
+        
         # 初始化多阶段检索系统
         if MULTI_STAGE_AVAILABLE:
             try:
@@ -200,15 +230,6 @@ class OptimizedRagUIWithMultiStage:
             print("❌ 多阶段检索系统不可用，回退到传统检索")
             self.chinese_retrieval_system = None
             self.english_retrieval_system = None
-        
-        print("\nStep 2. Loading generator...")
-        self.generator = load_generator(
-            generator_model_name=config.generator.model_name,
-            use_local_llm=True,
-            use_gpu=True,
-            gpu_device="cuda:1",
-            cache_dir=config.generator.cache_dir
-        )
         
         print("\nStep 3. Loading visualizer...")
         self.visualizer = Visualizer(show_mid_features=True)
@@ -294,162 +315,218 @@ class OptimizedRagUIWithMultiStage:
         datasource: str,
         reranker_checkbox: bool
     ) -> tuple[str, List[List[str]]]:
-        """Process user question using multi-stage retrieval"""
         if not question.strip():
-            return "Please enter a question.", []
+            return "请输入问题", []
         
-        print(f"\nProcessing question: {question}")
-        print(f"Data source: {datasource}")
-        
-        # Detect language
+        # 检测语言
         try:
-            from langdetect import detect
             lang = detect(question)
-            # 中文字符兜底
-            def is_chinese(text):
-                return len([c for c in text if '\u4e00' <= c <= '\u9fff']) > max(1, len(text) // 6)
-            if lang.startswith('zh') or (lang == 'ko' and is_chinese(question)) or is_chinese(question):
-                language = 'zh'
-            else:
-                language = 'en'
-        except Exception as e:
-            print(f"Language detection failed: {e}, fallback to English.")
+            language = 'zh' if lang.startswith('zh') else 'en'
+        except:
             language = 'en'
         
-        print(f"Detected language: {language}")
+        # 根据语言选择检索系统
+        if language == 'zh' and self.chinese_retrieval_system:
+            return self._process_chinese_with_multi_stage(question, reranker_checkbox)
+        elif language == 'en' and self.english_retrieval_system:
+            return self._process_english_with_multi_stage(question, reranker_checkbox)
+        else:
+            return self._fallback_retrieval(question, language)
+    
+    def _process_chinese_with_multi_stage(self, question: str, reranker_checkbox: bool) -> tuple[str, List[List[str]]]:
+        """使用多阶段检索系统处理中文查询"""
+        if not self.chinese_retrieval_system:
+            return self._fallback_retrieval(question, 'zh')
         
-        # 使用多阶段检索系统
-        if MULTI_STAGE_AVAILABLE:
-            try:
-                # 根据语言选择检索系统
-                if language == 'zh' and self.chinese_retrieval_system:
-                    print("🔍 使用中文多阶段检索系统...")
-                    retrieval_system = self.chinese_retrieval_system
-                    
-                    # 尝试提取公司名称和股票代码用于元数据过滤
-                    company_name = None
-                    stock_code = None
-                    
-                    # 简单的实体提取（可以改进）
-                    import re
-                    # 提取股票代码
-                    stock_match = re.search(r'\((\d{6})\)', question)
-                    if stock_match:
-                        stock_code = stock_match.group(1)
-                    
-                    # 提取公司名称（简单实现）
-                    company_patterns = [
-                        r'([^，。？\s]+(?:股份|集团|公司|有限|科技|网络|银行|证券|保险))',
-                        r'([^，。？\s]+(?:股份|集团|公司|有限|科技|网络|银行|证券|保险)[^，。？\s]*)'
-                    ]
-                    
-                    for pattern in company_patterns:
-                        company_match = re.search(pattern, question)
-                        if company_match:
-                            company_name = company_match.group(1)
-                            break
-                    
-                    # 执行多阶段检索
-                    results = retrieval_system.search(
-                        query=question,
-                        company_name=company_name,
-                        stock_code=stock_code,
-                        top_k=20
-                    )
-                    
-                    # 转换为DocumentWithMetadata格式
-                    retrieved_documents = []
-                    retriever_scores = []
-                    
-                    for result in results:
-                        # 创建DocumentWithMetadata对象
-                        doc = DocumentWithMetadata(
-                            content=result.get('original_context', result.get('summary', '')),
-                            metadata=DocumentMetadata(
-                                source=result.get('company_name', 'Unknown'),
-                                created_at="",
-                                author="",
-                                language="chinese"
-                            )
+        try:
+            # 尝试提取公司名称和股票代码用于元数据过滤
+            company_name = None
+            stock_code = None
+            
+            # 简单的实体提取
+            import re
+            # 提取股票代码
+            stock_match = re.search(r'\((\d{6})\)', question)
+            if stock_match:
+                stock_code = stock_match.group(1)
+            
+            # 提取公司名称（简单实现）
+            company_patterns = [
+                r'([^，。？\s]+(?:股份|集团|公司|有限|科技|网络|银行|证券|保险))',
+                r'([^，。？\s]+(?:股份|集团|公司|有限|科技|网络|银行|证券|保险)[^，。？\s]*)'
+            ]
+            
+            for pattern in company_patterns:
+                company_match = re.search(pattern, question)
+                if company_match:
+                    company_name = company_match.group(1)
+                    break
+            
+            # 执行多阶段检索
+            results = self.chinese_retrieval_system.search(
+                query=question,
+                company_name=company_name,
+                stock_code=stock_code,
+                top_k=20
+            )
+            
+            # 转换为DocumentWithMetadata格式
+            retrieved_documents = []
+            retriever_scores = []
+            
+            # 检查results的格式
+            if isinstance(results, dict) and 'retrieved_documents' in results:
+                documents = results['retrieved_documents']
+                llm_answer = results.get('llm_answer', '')
+                for result in documents:
+                    doc = DocumentWithMetadata(
+                        content=result.get('original_context', result.get('summary', '')),
+                        metadata=DocumentMetadata(
+                            source=result.get('company_name', 'Unknown'),
+                            created_at="",
+                            author="",
+                            language="chinese"
                         )
-                        retrieved_documents.append(doc)
-                        retriever_scores.append(result.get('combined_score', 0.0))
-                    
-                    print(f"✅ 多阶段检索完成，找到 {len(retrieved_documents)} 条结果")
-                    
-                elif language == 'en' and self.english_retrieval_system:
-                    print("🔍 使用英文多阶段检索系统...")
-                    retrieval_system = self.english_retrieval_system
-                    
-                    # 英文数据不支持元数据过滤
-                    results = retrieval_system.search(
-                        query=question,
-                        top_k=20
                     )
-                    
-                    # 转换为DocumentWithMetadata格式
-                    retrieved_documents = []
-                    retriever_scores = []
-                    
-                    for result in results:
-                        doc = DocumentWithMetadata(
-                            content=result.get('context', result.get('content', '')),
-                            metadata=DocumentMetadata(
-                                source=result.get('source', 'Unknown'),
-                                created_at="",
-                                author="",
-                                language="english"
-                            )
-                        )
-                        retrieved_documents.append(doc)
-                        retriever_scores.append(result.get('combined_score', 0.0))
-                    
-                    print(f"✅ 多阶段检索完成，找到 {len(retrieved_documents)} 条结果")
-                    
-                else:
-                    print("⚠️ 多阶段检索系统不可用，使用传统检索")
-                    return self._fallback_retrieval(question, language)
+                    retrieved_documents.append(doc)
+                    retriever_scores.append(result.get('combined_score', 0.0))
                 
-                # 生成答案
-                if retrieved_documents:
-                    # 构建上下文
-                    context_str = "\n\n".join([doc.content for doc in retrieved_documents[:10]])
-                    
-                    # 根据语言选择prompt模板
-                    if language == 'zh':
-                        from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_ZH
-                        prompt = PROMPT_TEMPLATE_ZH.format(context=context_str, question=question)
-                    else:
-                        from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_EN
-                        prompt = PROMPT_TEMPLATE_EN.format(context=context_str, question=question)
-                    
-                    # 生成答案
-                    generated_responses = self.generator.generate(texts=[prompt])
-                    answer = generated_responses[0] if generated_responses else "Unable to generate answer"
-                    
-                    # 准备上下文数据
+                # 如果多阶段检索系统已经生成了答案，直接使用
+                if llm_answer:
                     context_data = []
                     for doc, score in zip(retrieved_documents[:20], retriever_scores[:20]):
                         context_data.append([f"{score:.4f}", doc.content[:500] + "..." if len(doc.content) > 500 else doc.content])
-                    
-                    # 添加检索系统信息
-                    answer = f"[Multi-Stage Retrieval: {language.upper()}] {answer}"
-                    
+                    answer = f"[Multi-Stage Retrieval: ZH] {llm_answer}"
                     return answer, context_data
-                else:
-                    return "No relevant documents found.", []
-                    
-            except Exception as e:
-                print(f"❌ 多阶段检索失败: {e}")
-                return self._fallback_retrieval(question, language)
-        else:
-            print("❌ 多阶段检索系统不可用，使用传统检索")
-            return self._fallback_retrieval(question, language)
+            else:
+                for result in results:
+                    doc = DocumentWithMetadata(
+                        content=result.get('original_context', result.get('summary', '')),
+                        metadata=DocumentMetadata(
+                            source=result.get('company_name', 'Unknown'),
+                            created_at="",
+                            author="",
+                            language="chinese"
+                        )
+                    )
+                    retrieved_documents.append(doc)
+                    retriever_scores.append(result.get('combined_score', 0.0))
+            
+            if retrieved_documents:
+                context_str = "\n\n".join([doc.content for doc in retrieved_documents[:10]])
+                from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_ZH
+                prompt = PROMPT_TEMPLATE_ZH.format(context=context_str, question=question)
+                generated_responses = self.generator.generate(texts=[prompt])
+                answer = generated_responses[0] if generated_responses else "Unable to generate answer"
+                context_data = []
+                for doc, score in zip(retrieved_documents[:20], retriever_scores[:20]):
+                    context_data.append([f"{score:.4f}", doc.content[:500] + "..." if len(doc.content) > 500 else doc.content])
+                answer = f"[Multi-Stage Retrieval: ZH] {answer}"
+                return answer, context_data
+            else:
+                return "No relevant documents found.", []
+                
+        except Exception as e:
+            return self._fallback_retrieval(question, 'zh')
+    
+    def _process_english_with_multi_stage(self, question: str, reranker_checkbox: bool) -> tuple[str, List[List[str]]]:
+        """使用多阶段检索系统处理英文查询"""
+        if not self.english_retrieval_system:
+            return self._fallback_retrieval(question, 'en')
+        
+        try:
+            # 执行多阶段检索
+            results = self.english_retrieval_system.search(
+                query=question,
+                top_k=20
+            )
+            
+            # 转换为DocumentWithMetadata格式
+            retrieved_documents = []
+            retriever_scores = []
+            
+            for result in results:
+                doc = DocumentWithMetadata(
+                    content=result.get('context', result.get('content', '')),
+                    metadata=DocumentMetadata(
+                        source=result.get('source', 'Unknown'),
+                        created_at="",
+                        author="",
+                        language="english"
+                    )
+                )
+                retrieved_documents.append(doc)
+                retriever_scores.append(result.get('combined_score', 0.0))
+            
+            if retrieved_documents:
+                context_str = "\n\n".join([doc.content for doc in retrieved_documents[:10]])
+                from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_EN
+                prompt = PROMPT_TEMPLATE_EN.format(context=context_str, question=question)
+                generated_responses = self.generator.generate(texts=[prompt])
+                answer = generated_responses[0] if generated_responses else "Unable to generate answer"
+                context_data = []
+                for doc, score in zip(retrieved_documents[:20], retriever_scores[:20]):
+                    context_data.append([f"{score:.4f}", doc.content[:500] + "..." if len(doc.content) > 500 else doc.content])
+                answer = f"[Multi-Stage Retrieval: EN] {answer}"
+                return answer, context_data
+            else:
+                return "No relevant documents found.", []
+                
+        except Exception as e:
+            return self._fallback_retrieval(question, 'en')
     
     def _fallback_retrieval(self, question: str, language: str) -> tuple[str, List[List[str]]]:
-        """传统检索回退方法"""
-        # 这里可以实现传统的检索逻辑
-        return f"[Fallback Retrieval: {language.upper()}] Traditional retrieval not implemented yet.", []
+        """回退到传统检索"""
+        if self.rag_system is None:
+            return "传统RAG系统未初始化，无法处理查询", []
+        
+        try:
+            # 运行RAG系统
+            rag_output = self.rag_system.run(user_input=question, language=language)
+            
+            # 生成答案
+            if rag_output.retrieved_documents:
+                # 构建上下文
+                context_str = "\n\n".join([doc.content for doc in rag_output.retrieved_documents[:10]])
+                
+                # 根据语言选择prompt模板
+                if language == 'zh':
+                    from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_ZH
+                    prompt = PROMPT_TEMPLATE_ZH.format(context=context_str, question=question)
+                else:
+                    from xlm.components.rag_system.rag_system import PROMPT_TEMPLATE_EN
+                    prompt = PROMPT_TEMPLATE_EN.format(context=context_str, question=question)
+                
+                # 生成答案
+                generated_responses = self.generator.generate(texts=[prompt])
+                answer = generated_responses[0] if generated_responses else "Unable to generate answer"
+                
+                # 准备上下文数据
+                context_data = []
+                for doc, score in zip(rag_output.retrieved_documents[:20], rag_output.retriever_scores[:20]):
+                    # 统一只显示content字段，不显示question和answer
+                    content = doc.content
+                    # 确保content是字符串类型
+                    if not isinstance(content, str):
+                        if isinstance(content, dict):
+                            # 如果是字典，尝试提取context或content字段
+                            content = content.get('context', content.get('content', str(content)))
+                        else:
+                            content = str(content)
+                    
+                    # 截断过长的内容
+                    display_content = content[:500] + "..." if len(content) > 500 else content
+                    context_data.append([f"{score:.4f}", display_content])
+                
+                # 添加检索系统信息
+                answer = f"[Multi-Stage Retrieval: {language.upper()}] {answer}"
+                
+                return answer, context_data
+            else:
+                return "No relevant documents found.", []
+                
+        except Exception as e:
+            return f"检索失败: {str(e)}", []
     
     def launch(self, share: bool = False):
         """Launch UI interface"""

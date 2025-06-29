@@ -40,8 +40,8 @@ def main():
             cache_dir=config.cache_dir,
             use_faiss=True,
             enable_reranker=True,
-            window_title="Integrated Financial RAG System",
-            title="Integrated Financial RAG System",
+            window_title="Financial Explainable RAG System",
+            title="Financial Explainable RAG System",
             examples=[
                 ["德赛电池(000049)的下一季度收益预测如何？"],
                 ["用友网络2019年的每股经营活动产生的现金流量净额是多少？"],

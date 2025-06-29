@@ -9,7 +9,7 @@ from langdetect import detect, LangDetectException
 # Define the robust "Golden Prompts" directly in the code
 PROMPT_TEMPLATE_EN = """You are a highly analytical and precise financial expert. Your task is to answer the user's question **strictly based on the provided <context> information**.
 
-**CRITICAL: Your output must be a pure, direct answer. Do NOT include any self-reflection, thinking process, prompt analysis, irrelevant comments, format markers (like \boxed{}, numbered lists, bold text), or any form of meta-commentary. Do NOT quote or restate the prompt content. Your answer must end directly and concisely without any follow-up explanations.**
+**CRITICAL: Your output must be a pure, direct answer. Do NOT include any self-reflection, thinking process, prompt analysis, irrelevant comments, format markers (like boxed, numbered lists, bold text), or any form of meta-commentary. Do NOT quote or restate the prompt content. Your answer must end directly and concisely without any follow-up explanations.**
 
 Requirements:
 1.  **Strictly adhere to the provided <context>. Do not use any external knowledge or make assumptions.**
@@ -38,7 +38,7 @@ Answer:"""
 # 超简洁版本（推荐用于生产环境）
 PROMPT_TEMPLATE_ZH_SIMPLE = """基于上下文信息，用一句话回答用户问题。不要添加任何格式标记、编号或额外说明。
 
-**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 \boxed{}、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
+**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 boxed、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
 
 上下文：{context}
 问题：{question}
@@ -51,7 +51,7 @@ PROMPT_TEMPLATE_ZH_CLEAN = """基于以下上下文信息，直接回答用户�
 3. 不要添加任何格式标记、编号或额外说明
 4. 用自然的中文表达
 
-**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 \boxed{}、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
+**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 boxed、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
 
 上下文：{context}
 问题：{question}
@@ -59,7 +59,7 @@ PROMPT_TEMPLATE_ZH_CLEAN = """基于以下上下文信息，直接回答用户�
 
 PROMPT_TEMPLATE_ZH = """基于以下上下文信息，直接回答用户问题。只使用提供的信息，不要添加任何外部知识或格式化内容。
 
-**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 \\boxed{}、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
+**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 boxed、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
 
 示例1：
 上下文：中国平安2023年第一季度实现营业收入2,345.67亿元，同比增长8.5%；净利润为156.78亿元，同比增长12.3%。
@@ -81,7 +81,7 @@ PROMPT_TEMPLATE_ZH = """基于以下上下文信息，直接回答用户问题�
 # Chain-of-Thought版本（优化版，隐藏思考过程）
 PROMPT_TEMPLATE_ZH_COT = """你是一位专业的金融分析师。请基于以下上下文信息，通过内部思考来回答用户问题。
 
-**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 \boxed{}、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
+**极度重要：你的输出必须是纯粹、直接的回答，不包含任何自我反思、思考过程、对Prompt的分析、与回答无关的额外注释、任何格式标记（如 boxed、数字列表、加粗）、或任何形式的元评论。请勿引用或复述Prompt内容。你的回答必须直接、简洁地结束，不带任何引导语或后续说明。**
 
 重要要求：
 1. 请进行内部思考，但不要输出任何思考步骤或过程
@@ -131,15 +131,6 @@ class RagSystem:
             text=user_input, top_k=self.retriever_top_k, return_scores=True
         )
 
-        # 调试信息：检查retrieved_documents的类型和内容
-        print(f"DEBUG: retrieved_documents type: {type(retrieved_documents)}")
-        print(f"DEBUG: retrieved_documents length: {len(retrieved_documents)}")
-        if retrieved_documents:
-            print(f"DEBUG: First document type: {type(retrieved_documents[0])}")
-            print(f"DEBUG: First document content: {getattr(retrieved_documents[0], 'content', 'NO_CONTENT_ATTR')[:100]}...")
-            if isinstance(retrieved_documents[0], dict):
-                print(f"DEBUG: First document keys: {list(retrieved_documents[0].keys())}")
-
         # 3. Select prompt based on question language and format the context
         if is_chinese_q:
             if self.use_simple:
@@ -154,7 +145,7 @@ class RagSystem:
             prompt_template = PROMPT_TEMPLATE_EN
             no_context_message = "No suitable context found for your question. Please check the data sources."
 
-        if not retrieved_documents:
+        if not retrieved_documents or (isinstance(retrieved_documents, list) and len(retrieved_documents) == 0):
             return RagOutput(
                 retrieved_documents=[],
                 retriever_scores=[],
@@ -163,22 +154,76 @@ class RagSystem:
                 metadata={}
             )
 
-        context_str = "\n\n".join([
-            # 如果content是字典，提取其中的context或content字段
-            (doc.content.get('context', doc.content.get('content', str(doc.content))) if isinstance(doc.content, dict) else doc.content)
-            for doc in retrieved_documents
-        ])
+        # 构建上下文字符串
+        if isinstance(retrieved_documents, list):
+            context_parts = []
+            for doc in retrieved_documents:
+                if hasattr(doc, 'content'):
+                    content = doc.content
+                    # 处理不同类型的content
+                    if isinstance(content, dict):
+                        # 如果是字典，优先提取context字段，然后是content字段
+                        if 'context' in content:
+                            context_parts.append(str(content['context']))
+                        elif 'content' in content:
+                            context_parts.append(str(content['content']))
+                        else:
+                            # 如果没有找到context或content字段，将整个字典转为字符串
+                            context_parts.append(str(content))
+                    elif isinstance(content, str):
+                        context_parts.append(content)
+                    else:
+                        # 其他类型转为字符串
+                        context_parts.append(str(content))
+            
+            context_str = "\n\n".join(context_parts)
+        else:
+            context_str = str(retrieved_documents)
         
         # 4. Create the final prompt
+        # 多层回退机制确保prompt格式化成功
+        prompt = None
+        error_messages = []
+        
+        # 方法1: 使用命名参数格式化
         try:
             prompt = prompt_template.format(context=context_str, question=user_input)
         except (KeyError, IndexError) as e:
-            # 如果命名参数失败，尝试使用位置参数
-            print(f"Warning: Named parameter formatting failed, trying positional: {e}")
-            prompt = prompt_template.format(context_str, user_input)
+            error_msg = f"命名参数格式化失败: {e}"
+            error_messages.append(error_msg)
+        
+        # 方法2: 如果命名参数失败，尝试使用位置参数
+        if prompt is None:
+            try:
+                prompt = prompt_template.format(context_str, user_input)
+            except Exception as e:
+                error_msg = f"位置参数格式化失败: {e}"
+                error_messages.append(error_msg)
+        
+        # 方法3: 如果位置参数也失败，使用简单回退方案
+        if prompt is None:
+            try:
+                if is_chinese_q:
+                    prompt = f"基于以下上下文回答问题：\n\n{context_str}\n\n问题：{user_input}\n\n回答："
+                else:
+                    prompt = f"Context: {context_str}\nQuestion: {user_input}\nAnswer:"
+            except Exception as e:
+                error_msg = f"简单回退prompt创建失败: {e}"
+                error_messages.append(error_msg)
+        
+        # 方法4: 最后的兜底方案
+        if prompt is None:
+            prompt = f"Answer this question: {user_input}"
+        
+        # 确保prompt不为None
+        if prompt is None:
+            prompt = "Please answer the question."
         
         # 5. Generate the response
-        generated_responses = self.generator.generate(texts=[prompt])
+        try:
+            generated_responses = self.generator.generate(texts=[prompt])
+        except Exception as e:
+            raise e
         
         # 6. Gather metadata
         retriever_model_name = ""
@@ -199,7 +244,7 @@ class RagSystem:
         else:
             template_type = "EN"
 
-        return RagOutput(
+        result = RagOutput(
             retrieved_documents=retrieved_documents,
             retriever_scores=retriever_scores,
             prompt=prompt,
@@ -214,3 +259,4 @@ class RagSystem:
                 use_simple=self.use_simple
             ),
         )
+        return result
