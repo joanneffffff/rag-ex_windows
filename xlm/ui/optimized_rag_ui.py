@@ -198,7 +198,7 @@ class OptimizedRagUI:
                     self.chinese_retrieval_system = None
                 
                 # 英文数据路径（如果有的话）
-                english_data_path = Path("data/tatqa/processed_data.json")  # 需要预处理
+                english_data_path = Path(config.data.english_data_path)  # 使用配置文件中的路径
                 if english_data_path.exists():
                     print("✅ 初始化英文多阶段检索系统...")
                     self.english_retrieval_system = MultiStageRetrievalSystem(
@@ -209,6 +209,7 @@ class OptimizedRagUI:
                     print("✅ 英文多阶段检索系统初始化完成")
                 else:
                     print(f"⚠️ 英文数据文件不存在: {english_data_path}")
+                    print(f"配置的英文数据路径: {config.data.english_data_path}")
                     self.english_retrieval_system = None
                 
             except Exception as e:
@@ -423,11 +424,19 @@ class OptimizedRagUI:
                 
                 # 解释标签页
                 with gr.TabItem("Explanation"):
+                    # 使用HTML组件来显示可点击的上下文
+                    context_html_output = gr.HTML(
+                        label="Retrieved Contexts (Click to expand)",
+                        value="<p>No contexts retrieved yet.</p>"
+                    )
+                    
+                    # 保留原有的DataFrame作为备用
                     context_output = gr.Dataframe(
                         headers=["Score", "Context"],
                         datatype=["number", "str"],
-                        label="Retrieved Contexts",
-                        interactive=False
+                        label="Retrieved Contexts (Table View)",
+                        interactive=False,
+                        visible=False  # 默认隐藏
                     )
 
             # 添加示例问题
@@ -441,7 +450,7 @@ class OptimizedRagUI:
             submit_btn.click(
                 self._process_question,
                 inputs=[question_input, datasource, reranker_checkbox],
-                outputs=[answer_output, context_output]
+                outputs=[answer_output, context_html_output]
             )
             
             return interface
@@ -451,9 +460,9 @@ class OptimizedRagUI:
         question: str,
         datasource: str,
         reranker_checkbox: bool
-    ) -> tuple[str, List[List[str]]]:
+    ) -> tuple[str, str]:
         if not question.strip():
-            return "请输入问题", []
+            return "请输入问题", "<p>请输入问题</p>"
         
         # 检测语言
         try:
@@ -462,6 +471,13 @@ class OptimizedRagUI:
         except:
             language = 'en'
         
+        # 打印查询信息
+        print(f"\n=== 查询信息 ===")
+        print(f"查询语言: {language}")
+        print(f"查询内容: {question}")
+        print(f"数据源: {datasource}")
+        print(f"重排序器: {'启用' if reranker_checkbox else '禁用'}")
+        
         # 检测数据源
         detected_data_source = self._detect_data_source(question, language)
         
@@ -469,24 +485,149 @@ class OptimizedRagUI:
         use_reranker = reranker_checkbox
         
         try:
-            # 运行RAG系统
-            rag_output = self.rag_system.run(user_input=question, language=language)
+            # 根据语言选择检索系统
+            if language == 'zh' and hasattr(self, 'chinese_retrieval_system') and self.chinese_retrieval_system:
+                # 使用多阶段检索系统处理中文查询
+                print("使用多阶段检索系统处理中文查询...")
+                
+                # 提取公司名称和股票代码
+                company_name = None
+                stock_code = None
+                
+                # 提取股票代码
+                stock_match = re.search(r'\((\d{6})\)', question)
+                if stock_match:
+                    stock_code = stock_match.group(1)
+                    print(f"提取到股票代码: {stock_code}")
+                
+                # 提取公司名称
+                company_patterns = [
+                    r'([^，。？\s]+(?:股份|集团|公司|有限|科技|网络|银行|证券|保险))',
+                    r'([^，。？\s]+(?:股份|集团|公司|有限|科技|网络|银行|证券|保险)[^，。？\s]*)'
+                ]
+                
+                for pattern in company_patterns:
+                    company_match = re.search(pattern, question)
+                    if company_match:
+                        company_name = company_match.group(1)
+                        print(f"提取到公司名称: {company_name}")
+                        break
+                
+                # 执行多阶段检索
+                results = self.chinese_retrieval_system.search(
+                    query=question,
+                    company_name=company_name,
+                    stock_code=stock_code,
+                    top_k=20
+                )
+                
+                # 转换为DocumentWithMetadata格式
+                unique_docs = []
+                
+                if isinstance(results, dict) and 'retrieved_documents' in results:
+                    documents = results['retrieved_documents']
+                    llm_answer = results.get('llm_answer', '')
+                    
+                    for result in documents:
+                        # 使用完整的original_context而不是截断的context
+                        content = result.get('original_context', result.get('summary', ''))
+                        doc = DocumentWithMetadata(
+                            content=content,
+                            metadata=DocumentMetadata(
+                                source=result.get('company_name', 'Unknown'),
+                                created_at="",
+                                author="",
+                                language="chinese"
+                            )
+                        )
+                        unique_docs.append((doc, result.get('combined_score', 0.0)))
+                    
+                    # 如果多阶段检索系统已经生成了答案，直接使用
+                    if llm_answer:
+                        answer = f"[Multi-Stage Retrieval: ZH] {llm_answer}"
+                    else:
+                        answer = "多阶段检索系统未生成答案"
+                else:
+                    answer = "多阶段检索系统返回格式错误"
+                
+            elif language == 'en' and hasattr(self, 'english_retrieval_system') and self.english_retrieval_system:
+                # 使用多阶段检索系统处理英文查询
+                print("使用多阶段检索系统处理英文查询...")
+                
+                results = self.english_retrieval_system.search(
+                    query=question,
+                    top_k=20
+                )
+                
+                unique_docs = []
+                
+                if isinstance(results, dict) and 'retrieved_documents' in results:
+                    documents = results['retrieved_documents']
+                    llm_answer = results.get('llm_answer', '')
+                    
+                    for result in documents:
+                        # 使用完整的context而不是截断的context
+                        content = result.get('context', result.get('content', ''))
+                        doc = DocumentWithMetadata(
+                            content=content,
+                            metadata=DocumentMetadata(
+                                source=result.get('source', 'Unknown'),
+                                created_at="",
+                                author="",
+                                language="english"
+                            )
+                        )
+                        unique_docs.append((doc, result.get('combined_score', 0.0)))
+                    
+                    if llm_answer:
+                        answer = f"[Multi-Stage Retrieval: EN] {llm_answer}"
+                    else:
+                        answer = "多阶段检索系统未生成答案"
+                else:
+                    answer = "多阶段检索系统返回格式错误"
+                    
+            else:
+                # 回退到传统RAG系统
+                print("回退到传统RAG系统...")
+                rag_output = self.rag_system.run(user_input=question, language=language)
+                
+                # 去重处理
+                unique_docs = []
+                seen_hashes = set()
+                
+                for doc, score in zip(rag_output.retrieved_documents, rag_output.retriever_scores):
+                    content = doc.content
+                    h = hashlib.md5(content.encode('utf-8')).hexdigest()
+                    if h not in seen_hashes:
+                        unique_docs.append((doc, score))
+                        seen_hashes.add(h)
+                    if len(unique_docs) >= 20:
+                        break
+                
+                answer = rag_output.generated_responses[0] if rag_output.generated_responses else "Unable to generate answer"
             
-            # 去重处理
-            unique_docs = []
-            seen_hashes = set()
-            
-            for doc, score in zip(rag_output.retrieved_documents, rag_output.retriever_scores):
+            # 打印检索到的原始上下文
+            print(f"\n=== 检索到的原始上下文 ===")
+            print(f"检索到 {len(unique_docs)} 个唯一文档")
+            for i, (doc, score) in enumerate(unique_docs[:5]):  # 只显示前5个
                 content = doc.content
-                h = hashlib.md5(content.encode('utf-8')).hexdigest()
-                if h not in seen_hashes:
-                    unique_docs.append((doc, score))
-                    seen_hashes.add(h)
-                if len(unique_docs) >= 20:
-                    break
+                if not isinstance(content, str):
+                    if isinstance(content, dict):
+                        content = content.get('context', content.get('content', str(content)))
+                    else:
+                        content = str(content)
+                
+                # 截断显示
+                display_content = content[:300] + "..." if len(content) > 300 else content
+                print(f"文档 {i+1} (分数: {score:.4f}): {display_content}")
             
-            # Prepare answer
-            answer = rag_output.generated_responses[0] if rag_output.generated_responses else "Unable to generate answer"
+            if len(unique_docs) > 5:
+                print(f"... 还有 {len(unique_docs) - 5} 个文档")
+            
+            # 打印LLM响应
+            print(f"\n=== LLM响应 ===")
+            print(f"生成答案: {answer}")
+            print(f"检索文档数: {len(unique_docs)}")
             
             # Add reranker info to answer if used
             if use_reranker:
@@ -494,28 +635,93 @@ class OptimizedRagUI:
             else:
                 answer = f"[Reranker: Disabled] {answer}"
             
-            # Prepare context data
-            context_data = []
-            for doc, score in unique_docs:
-                # 统一只显示content字段，不显示question和answer
-                content = doc.content
-                # 确保content是字符串类型
-                if not isinstance(content, str):
-                    if isinstance(content, dict):
-                        # 如果是字典，尝试提取context或content字段
-                        content = content.get('context', content.get('content', str(content)))
-                    else:
-                        content = str(content)
-                
-                # 截断过长的内容
-                display_content = content[:500] + "..." if len(content) > 500 else content
-                context_data.append([f"{score:.4f}", display_content])
+            # 生成HTML格式的可点击上下文
+            html_content = self._generate_clickable_context_html(unique_docs)
             
-            return answer, context_data
+            print(f"=== 查询处理完成 ===\n")
+            return answer, html_content
             
         except Exception as e:
             error_msg = f"处理问题时出错: {str(e)}"
-            return error_msg, []
+            print(f"错误: {error_msg}")
+            return error_msg, f"<p style='color: red;'>{error_msg}</p>"
+    
+    def _generate_clickable_context_html(self, unique_docs: List[Tuple[DocumentWithMetadata, float]]) -> str:
+        """
+        生成可点击展开的HTML上下文内容
+        
+        Args:
+            unique_docs: 文档和分数的列表
+            
+        Returns:
+            HTML字符串
+        """
+        if not unique_docs:
+            return "<p>没有检索到相关文档。</p>"
+        
+        html_parts = []
+        html_parts.append("""
+        <div style='font-family: Arial, sans-serif;'>
+        <style>
+        .expand-btn, .collapse-btn {
+            margin-top: 10px;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            color: white;
+        }
+        .expand-btn { background-color: #28a745; }
+        .collapse-btn { background-color: #dc3545; }
+        .content-section { margin-bottom: 20px; border: 1px solid #ddd; border-radius: 8px; padding: 15px; background-color: #f9f9f9; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .score { background-color: #007bff; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .short-content, .full-content { margin: 0; line-height: 1.6; }
+        .short-content { color: #555; }
+        .full-content { color: #333; white-space: pre-wrap; }
+        </style>
+        """)
+        
+        for i, (doc, score) in enumerate(unique_docs):
+            # 获取文档内容
+            content = doc.content
+            if not isinstance(content, str):
+                if isinstance(content, dict):
+                    content = content.get('context', content.get('content', str(content)))
+                else:
+                    content = str(content)
+            
+            # 生成短版本和完整版本
+            short_content = content[:300] + "..." if len(content) > 300 else content
+            full_content = content.replace('\n', '<br>')
+            
+            # 创建可点击的HTML元素 - 使用CSS类名和更简单的JavaScript
+            html_parts.append(f"""
+            <div class='content-section'>
+                <div class='header'>
+                    <strong style='color: #333;'>文档 {i+1}</strong>
+                    <span class='score'>相似度: {score:.4f}</span>
+                </div>
+                
+                <div class='short-content' id='short_{i}'>
+                    <p>{short_content}</p>
+                    <button class='expand-btn' onclick='document.getElementById("short_{i}").style.display="none"; document.getElementById("full_{i}").style.display="block";'>
+                        展开全文
+                    </button>
+                </div>
+                
+                <div class='full-content' id='full_{i}' style='display: none;'>
+                    <p>{full_content}</p>
+                    <button class='collapse-btn' onclick='document.getElementById("full_{i}").style.display="none"; document.getElementById("short_{i}").style.display="block";'>
+                        收起
+                    </button>
+                </div>
+            </div>
+            """)
+        
+        html_parts.append("</div>")
+        return ''.join(html_parts)
     
     def _detect_data_source(self, question: str, language: str) -> str:
         """检测数据源类型"""

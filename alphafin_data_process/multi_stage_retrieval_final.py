@@ -6,6 +6,7 @@ from collections import defaultdict
 import re
 from datetime import datetime
 import sys
+import numpy as np
 
 # 需要安装的依赖：pip install faiss-cpu sentence-transformers torch
 try:
@@ -26,6 +27,55 @@ except ImportError as e:
     print(f"无法导入QwenReranker或Config: {e}")
     print("请确保xlm目录结构正确")
     exit(1)
+
+def load_json_or_jsonl(file_path: Path) -> List[Dict]:
+    """
+    兼容加载JSON或JSONL格式文件
+    
+    Args:
+        file_path: 文件路径
+        
+    Returns:
+        数据列表
+    """
+    print(f"正在加载数据文件: {file_path}")
+    
+    try:
+        # 首先尝试作为JSON加载
+        with open(file_path, 'r', encoding='utf-8') as f:
+            try:
+                data = json.load(f)
+                print(f"成功加载JSON格式文件，共 {len(data)} 条记录")
+                return data
+            except json.JSONDecodeError as e:
+                print(f"JSON格式解析失败: {e}")
+                print("尝试作为JSONL格式加载...")
+                
+                # 重置文件指针
+                f.seek(0)
+                
+                # 尝试作为JSONL加载
+                data = []
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if line:  # 跳过空行
+                        try:
+                            item = json.loads(line)
+                            data.append(item)
+                        except json.JSONDecodeError as line_error:
+                            print(f"警告: 第{line_num}行JSON解析失败: {line_error}")
+                            print(f"问题行内容: {line[:100]}...")
+                            continue
+                
+                print(f"成功加载JSONL格式文件，共 {len(data)} 条记录")
+                return data
+                
+    except FileNotFoundError:
+        print(f"错误: 文件不存在: {file_path}")
+        return []
+    except Exception as e:
+        print(f"错误: 读取文件失败: {e}")
+        return []
 
 class MultiStageRetrievalSystem:
     """
@@ -108,8 +158,7 @@ class MultiStageRetrievalSystem:
         
         # 加载原始AlphaFin数据用于FAISS索引
         print("加载原始AlphaFin数据用于FAISS索引...")
-        with open(self.data_path, 'r', encoding='utf-8') as f:
-            self.original_data = json.load(f)
+        self.original_data = load_json_or_jsonl(self.data_path)
         print(f"加载了 {len(self.original_data)} 条原始记录")
         
         # 建立doc_id到chunks的映射
@@ -413,52 +462,68 @@ class MultiStageRetrievalSystem:
             max_candidates: 最大候选数量
             
         Returns:
-            候选记录的索引列表
+            候选记录索引列表
         """
         if self.dataset_type != "chinese":
-            print("非中文数据集，不支持元数据预过滤，返回所有记录")
-            return list(range(len(self.data)))[:max_candidates]
+            print("非中文数据集，跳过预过滤")
+            return list(range(len(self.data)))
         
-        # 检查是否有元数据索引
-        if not self.metadata_index:
-            print("没有元数据索引，返回所有记录")
-            return list(range(len(self.data)))[:max_candidates]
+        print("开始元数据预过滤...")
         
-        candidates = set()
+        # 如果没有提供任何过滤条件，返回所有记录
+        if not any([company_name, stock_code, report_date]):
+            print("无过滤条件，返回所有记录")
+            return list(range(len(self.data)))
         
-        # 如果提供了公司名称和股票代码，优先使用组合索引
+        # 优先使用组合索引（公司名称+股票代码）
         if company_name and stock_code:
-            key = f"{company_name.strip().lower()}_{stock_code.strip().lower()}"
+            company_name_lower = company_name.strip().lower()
+            stock_code_lower = str(stock_code).strip().lower()
+            key = f"{company_name_lower}_{stock_code_lower}"
+            
             if key in self.metadata_index['company_stock']:
-                candidates.update(self.metadata_index['company_stock'][key])
+                indices = self.metadata_index['company_stock'][key]
+                print(f"组合过滤: 公司'{company_name}' + 股票'{stock_code}' 匹配 {len(indices)} 条记录")
+                return indices[:max_candidates]
+            else:
+                print(f"组合过滤: 公司'{company_name}' + 股票'{stock_code}' 无匹配记录")
+                return []
         
         # 如果只提供了公司名称
         elif company_name:
             company_name_lower = company_name.strip().lower()
             if company_name_lower in self.metadata_index['company_name']:
-                candidates.update(self.metadata_index['company_name'][company_name_lower])
+                indices = self.metadata_index['company_name'][company_name_lower]
+                print(f"公司名称过滤: '{company_name}' 匹配 {len(indices)} 条记录")
+                return indices[:max_candidates]
+            else:
+                print(f"公司名称过滤: '{company_name}' 无匹配记录")
+                return []
         
         # 如果只提供了股票代码
         elif stock_code:
-            stock_code_lower = stock_code.strip().lower()
+            stock_code_lower = str(stock_code).strip().lower()
             if stock_code_lower in self.metadata_index['stock_code']:
-                candidates.update(self.metadata_index['stock_code'][stock_code_lower])
+                indices = self.metadata_index['stock_code'][stock_code_lower]
+                print(f"股票代码过滤: '{stock_code}' 匹配 {len(indices)} 条记录")
+                return indices[:max_candidates]
+            else:
+                print(f"股票代码过滤: '{stock_code}' 无匹配记录")
+                return []
         
-        # 如果提供了报告日期
-        if report_date:
-            report_date_clean = report_date.strip()
-            if report_date_clean in self.metadata_index['report_date']:
-                candidates.update(self.metadata_index['report_date'][report_date_clean])
+        # 如果只提供了报告日期
+        elif report_date:
+            report_date_str = report_date.strip()
+            if report_date_str in self.metadata_index['report_date']:
+                indices = self.metadata_index['report_date'][report_date_str]
+                print(f"报告日期过滤: '{report_date}' 匹配 {len(indices)} 条记录")
+                return indices[:max_candidates]
+            else:
+                print(f"报告日期过滤: '{report_date}' 无匹配记录")
+                return []
         
-        # 如果没有提供任何元数据，返回所有记录
-        if not candidates:
-            candidates = set(range(len(self.data)))
-        
-        # 限制候选数量
-        candidates = list(candidates)[:max_candidates]
-        
-        print(f"预过滤结果: {len(candidates)} 条候选记录")
-        return candidates
+        print("预过滤完成，候选文档数: 0")
+        return []
     
     def faiss_search(self, query: str, candidate_indices: List[int], top_k: int = 100) -> List[Tuple[int, float]]:
         """
@@ -472,31 +537,39 @@ class MultiStageRetrievalSystem:
         Returns:
             (索引, 相似度分数) 的列表
         """
-        if self.faiss_index is None or self.embedding_model is None:
-            print("FAISS索引或嵌入模型未初始化")
+        if self.faiss_index is None:
+            print("FAISS索引未初始化")
             return []
+        
+        print(f"开始FAISS检索，候选文档数: {len(candidate_indices)}")
         
         # 生成查询嵌入
         try:
             query_embedding = self.embedding_model.encode([query])
-            
-            # 在FAISS中搜索
-            scores, indices = self.faiss_index.search(query_embedding.astype('float32'), top_k)
-            
-            # 将FAISS索引映射回原始数据索引
-            results = []
-            for faiss_idx, score in zip(indices[0], scores[0]):
-                if faiss_idx < len(self.valid_indices):
-                    original_idx = self.valid_indices[faiss_idx]
-                    # 检查是否在候选列表中
-                    if original_idx in candidate_indices:
-                        results.append((original_idx, float(score)))
-            
-            print(f"FAISS检索结果: {len(results)} 条记录")
-            return results
+            print(f"查询嵌入生成完成，维度: {query_embedding.shape}")
         except Exception as e:
-            print(f"FAISS检索失败: {e}")
+            print(f"查询嵌入生成失败: {e}")
             return []
+        
+        # 在FAISS中搜索
+        try:
+            scores, indices = self.faiss_index.search(query_embedding.astype('float32'), top_k)
+            print(f"FAISS搜索完成，找到 {len(indices[0])} 个候选")
+        except Exception as e:
+            print(f"FAISS搜索失败: {e}")
+            return []
+        
+        # 将FAISS索引映射回原始数据索引
+        results = []
+        for faiss_idx, score in zip(indices[0], scores[0]):
+            if faiss_idx < len(self.valid_indices):
+                original_idx = self.valid_indices[faiss_idx]
+                # 检查是否在候选列表中
+                if original_idx in candidate_indices:
+                    results.append((original_idx, float(score)))
+        
+        print(f"FAISS检索完成，有效结果: {len(results)} 条记录")
+        return results
     
     def rerank(self, 
                query: str, 
@@ -521,18 +594,15 @@ class MultiStageRetrievalSystem:
         
         # 准备重排序的文档 - 使用doc_id到chunks的映射
         docs_for_rerank = []
-        doc_to_rerank_mapping = []  # 记录重排序结果到原始doc_id的映射
+        doc_to_rerank_mapping = []
         
         for doc_idx, faiss_score in candidate_results:
-            # 从映射中找到对应的chunks
             if doc_idx in self.doc_to_chunks_mapping:
                 chunks = self.doc_to_chunks_mapping[doc_idx]
-                
-                # 对每个chunk进行重排序
-                for chunk_idx, chunk_content in enumerate(chunks):
-                    if chunk_content.strip():  # 跳过空chunk
-                        docs_for_rerank.append(chunk_content)
-                        doc_to_rerank_mapping.append((doc_idx, chunk_idx))
+                for chunk in chunks:
+                    if chunk.strip():  # 跳过空chunk
+                        docs_for_rerank.append(chunk)
+                        doc_to_rerank_mapping.append((doc_idx, faiss_score))
             else:
                 # 如果找不到映射，使用原始数据
                 if doc_idx < len(self.data):
@@ -541,59 +611,41 @@ class MultiStageRetrievalSystem:
                         content = record.get('summary', '')
                     else:
                         content = record.get('context', '')
-                    docs_for_rerank.append(content)
-                    doc_to_rerank_mapping.append((doc_idx, -1))
-                else:
-                    docs_for_rerank.append("")
-                    doc_to_rerank_mapping.append((doc_idx, -1))
+                    if content.strip():
+                        docs_for_rerank.append(content)
+                        doc_to_rerank_mapping.append((doc_idx, faiss_score))
+        
+        print(f"准备重排序 {len(docs_for_rerank)} 个chunks...")
         
         if not docs_for_rerank:
-            print("没有有效的文档用于重排序")
+            print("没有可重排序的文档")
             return [(idx, score, 0.0) for idx, score in candidate_results[:top_k]]
         
+        # 使用Qwen重排序器进行重排序
         try:
-            # 使用合理的批处理大小
-            reranked_docs = self.qwen_reranker.rerank(
-                query=query,
-                documents=docs_for_rerank,
-                batch_size=4  # 增加到4，避免batch_size=1的问题
-            )
-            
-            print(f"Qwen重排序结果: {len(reranked_docs)} 条记录")
-            
-            # 组合结果，按doc_id分组，取最高分
-            doc_scores = {}
-            for i, (doc_content, reranker_score) in enumerate(reranked_docs):
-                if i < len(doc_to_rerank_mapping):
-                    doc_idx, chunk_idx = doc_to_rerank_mapping[i]
-                    
-                    # 为每个doc_id记录最高分
-                    if doc_idx not in doc_scores or reranker_score > doc_scores[doc_idx]['score']:
-                        doc_scores[doc_idx] = {
-                            'score': reranker_score,
-                            'chunk_idx': chunk_idx
-                        }
-            
-            # 组合FAISS分数和重排序分数
-            results = []
-            for doc_idx, faiss_score in candidate_results:
-                if doc_idx in doc_scores:
-                    reranker_score = doc_scores[doc_idx]['score']
-                    results.append((doc_idx, faiss_score, reranker_score))
-                else:
-                    # 如果没有重排序分数，使用0
-                    results.append((doc_idx, faiss_score, 0.0))
-            
-            # 按重排序分数降序排序
-            results.sort(key=lambda x: x[2], reverse=True)
-            
-            return results[:top_k]
-            
+            reranked_results = self.qwen_reranker.rerank(query, docs_for_rerank, batch_size=4)
+            print(f"重排序器处理完成，返回 {len(reranked_results)} 个结果")
         except Exception as e:
-            print(f"Qwen重排序失败: {e}")
-            print("回退到FAISS分数排序")
-            # 回退到FAISS分数排序
+            print(f"重排序失败: {e}")
+            # 回退到原始结果
             return [(idx, score, 0.0) for idx, score in candidate_results[:top_k]]
+        
+        # 将重排序结果映射回原始文档索引
+        final_results = []
+        for doc_text, reranker_score in reranked_results:
+            # 找到对应的原始文档索引
+            for i, (doc_idx, faiss_score) in enumerate(doc_to_rerank_mapping):
+                if i < len(docs_for_rerank) and docs_for_rerank[i] == doc_text:
+                    # 组合分数：FAISS分数 + 重排序分数
+                    combined_score = faiss_score + reranker_score
+                    final_results.append((doc_idx, faiss_score, combined_score))
+                    break
+        
+        # 按组合分数排序
+        final_results.sort(key=lambda x: x[2], reverse=True)
+        
+        print(f"重排序完成，返回 {len(final_results)} 个结果")
+        return final_results[:top_k]
     
     def generate_answer(self, query: str, candidate_results: List[Tuple[int, float, float]], top_k_for_context: int = 5) -> str:
         """
@@ -639,8 +691,29 @@ class MultiStageRetrievalSystem:
         # 使用LLM生成器生成答案
         if self.llm_generator:
             try:
-                # 构建prompt
-                prompt = f"基于以下上下文信息，回答用户的问题。\n\n上下文：{context}\n\n问题：{query}\n\n回答："
+                # 根据数据集类型选择prompt模板
+                if self.dataset_type == "chinese":
+                    # 中文prompt模板
+                    prompt = f"基于以下上下文信息，回答用户的问题。\n\n上下文：{context}\n\n问题：{query}\n\n回答："
+                else:
+                    # 英文prompt模板
+                    prompt = f"""You are a highly analytical and precise financial expert. Your task is to answer the user's question **strictly based on the provided context information**.
+
+**CRITICAL: Your output must be a pure, direct answer. Do NOT include any self-reflection, thinking process, prompt analysis, irrelevant comments, format markers (like boxed, numbered lists, bold text), or any form of meta-commentary. Do NOT quote or restate the prompt content. Your answer must end directly and concisely without any follow-up explanations.**
+
+Requirements:
+1.  **Strictly adhere to the provided context. Do not use any external knowledge or make assumptions.**
+2.  If the context does not contain sufficient information to answer the question, state: "The answer cannot be found in the provided context."
+3.  For questions involving financial predictions or future outlook, prioritize information explicitly stated as forecasts or outlooks within the context.
+4.  Provide a concise and direct answer in complete sentences.
+5.  Do not repeat the question or add conversational fillers.
+
+Context:
+{context}
+
+Question: {query}
+
+Answer:"""
                 
                 # 使用LocalLLMGenerator的generate方法
                 generated_texts = self.llm_generator.generate([prompt])
@@ -650,7 +723,10 @@ class MultiStageRetrievalSystem:
                 answer = f"抱歉，生成答案时出现错误：{str(e)}"
         else:
             # 回退到默认的简单模板回答
-            answer = f"基于检索到的信息，我可以回答您的问题：{query}\n\n相关上下文：{context[:500]}...\n\n这是一个基于检索结果的回答。"
+            if self.dataset_type == "chinese":
+                answer = f"基于检索到的信息，我可以回答您的问题：{query}\n\n相关上下文：{context[:500]}...\n\n这是一个基于检索结果的回答。"
+            else:
+                answer = f"Based on the retrieved information, I can answer your question: {query}\n\nRelevant context: {context[:500]}...\n\nThis is an answer based on the retrieved results."
         
         print(f"LLM答案生成完成")
         return answer
@@ -698,12 +774,23 @@ class MultiStageRetrievalSystem:
         
         # 1. Pre-filtering（仅中文数据支持）
         candidate_indices = self.pre_filter(company_name, stock_code, report_date)
+        print(f"预过滤结果: {len(candidate_indices)} 个候选文档")
+        
+        # 如果预过滤没有找到匹配的文档，回退到全量FAISS检索
+        if len(candidate_indices) == 0:
+            print("预过滤无结果，回退到全量FAISS检索...")
+            candidate_indices = list(range(len(self.data)))
+            print(f"回退到全量检索，候选文档数: {len(candidate_indices)}")
         
         # 2. FAISS检索
         faiss_results = self.faiss_search(query, candidate_indices, top_k=min(retrieval_top_k, len(candidate_indices)))
+        print(f"FAISS检索结果: {len(faiss_results)} 个文档")
         
         # 3. Qwen Reranker
+        print("开始重排序...")
         final_results = self.rerank(query, faiss_results, top_k=rerank_top_k)
+        print(f"重排序完成: {len(final_results)} 个chunks")
+        print("重排序器处理完成")
         
         # 4. LLM答案生成 - 将重排序后的Top-K1个chunks拼接作为上下文
         llm_answer = self.generate_answer(query, final_results, top_k_for_context=5)
@@ -724,40 +811,35 @@ class MultiStageRetrievalSystem:
                     'source': record.metadata.source if hasattr(record.metadata, 'source') else 'unknown',
                     'language': record.metadata.language if hasattr(record.metadata, 'language') else 'unknown'
                 }
-            elif isinstance(record, dict):
-                # 字典格式（兼容旧格式）
+            else:
+                # 字典格式
                 if self.dataset_type == "chinese":
+                    # 中文数据：使用original_context
+                    context = record.get('original_context', '')
                     result = {
                         'index': idx,
                         'faiss_score': faiss_score,
                         'combined_score': combined_score,
-                        'company_name': record.get('company_name'),
-                        'stock_code': record.get('stock_code'),
-                        'report_date': record.get('report_date'),
-                        'original_context': record.get('original_context', ''),  # 返回完整的original_context
+                        'context': context[:200] + '...' if len(context) > 200 else context,
+                        'company_name': record.get('company_name', ''),
+                        'stock_code': record.get('stock_code', ''),
+                        'report_date': record.get('report_date', ''),
                         'summary': record.get('summary', '')[:200] + '...' if len(record.get('summary', '')) > 200 else record.get('summary', ''),
                         'generated_question': record.get('generated_question', ''),
                         'original_question': record.get('original_question', ''),
                         'original_answer': record.get('original_answer', '')
                     }
                 else:
+                    # 英文数据：使用context
+                    context = record.get('context', '') or record.get('content', '')
                     result = {
                         'index': idx,
                         'faiss_score': faiss_score,
                         'combined_score': combined_score,
-                        'context': record.get('context', '')[:200] + '...' if len(record.get('context', '')) > 200 else record.get('context', ''),
-                        'content': record.get('content', '')[:200] + '...' if len(record.get('content', '')) > 200 else record.get('content', ''),
-                        'uid': record.get('uid', ''),
-                        'source': record.get('source', '')
+                        'context': context[:200] + '...' if len(context) > 200 else context,
+                        'question': record.get('question', ''),
+                        'answer': record.get('answer', '')
                     }
-            else:
-                # 其他格式
-                result = {
-                    'index': idx,
-                    'faiss_score': faiss_score,
-                    'combined_score': combined_score,
-                    'content': str(record)[:200] + '...' if len(str(record)) > 200 else str(record)
-                }
             
             formatted_results.append(result)
         
